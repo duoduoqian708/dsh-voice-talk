@@ -103,6 +103,33 @@ const CSS = `
   width: 92px; height: 92px; border-radius: 50%;
   box-shadow: 0 6px 30px rgba(77, 163, 255, .35), 0 0 0 1px rgba(255,255,255,.12) inset;
 }
+/* the whale avatar: gradient circle backing, phase-driven swim (transform-only) */
+.dsh-voice-avatar-circle {
+  width: 92px; height: 92px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 32% 28%, rgba(106, 184, 255, .30), rgba(43, 92, 168, .22) 58%, rgba(16, 38, 76, .30) 100%);
+  box-shadow: 0 6px 30px rgba(77, 163, 255, .35), 0 0 0 1px rgba(255,255,255,.12) inset;
+  color: #E6EDF7;
+  overflow: hidden;
+}
+.dsh-voice-whale { width: 58px; height: auto; }
+.dsh-voice-avatar-wrap[data-phase="thinking"] .dsh-voice-whale {
+  animation: dsh-whale-swim-slow 3s ease-in-out infinite;
+}
+.dsh-voice-avatar-wrap[data-phase="speaking"] .dsh-voice-whale {
+  animation: dsh-whale-swim-fast 1.2s ease-in-out infinite;
+}
+@keyframes dsh-whale-swim-slow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(-3.5deg); }
+  50% { transform: translateY(-4px) rotate(0deg); }
+  75% { transform: translateY(-2px) rotate(3.5deg); }
+}
+@keyframes dsh-whale-swim-fast {
+  0%, 100% { transform: translateY(1px) rotate(-6deg); }
+  30% { transform: translateY(-6px) rotate(2deg); }
+  60% { transform: translateY(-2px) rotate(7deg); }
+}
 .dsh-voice-ripples { position: absolute; inset: 0; pointer-events: none; }
 .dsh-voice-ring {
   position: absolute; inset: 0; border-radius: 50%;
@@ -266,6 +293,7 @@ const CSS = `
     animation: none !important;
   }
   .dsh-voice-ring { opacity: .18 !important; transform: none !important; }
+  .dsh-voice-whale { animation: none !important; }
 }
 `
 
