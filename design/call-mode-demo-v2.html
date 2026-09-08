@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<!-- dsh-voice-talk 通话层静态预览 v2 — Apple 风格重做。
+     方向：FaceTime × 语音备忘录。亮色 #F5F5F7 底、白磨砂窗、
+     iMessage 气泡流、Voice-Memos 式实时波形（唯一数据驱动动效）。
+     类名沿用 dsh-voice-* 前缀，批准后按此重写 src/client/styles.ts。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-voice-talk · 通话层预览 v2（Apple 风格）</title>
+<style>
+  :root {
+    color-scheme: light;
+    --canvas: #F5F5F7;
+    --ink: #1D1D1F;
+    --ink-2: #6E6E73;
+    --ink-3: #86868B;
+    --hairline: rgba(0, 0, 0, .08);
+    --blue: #007AFF;
+    --red: #FF3B30;
+    --glass: rgba(255, 255, 255, .72);
+    --glass-strong: rgba(255, 255, 255, .92);
+    --radius-window: 28px;
+    --radius-pill: 999px;
+    --ease: cubic-bezier(.25, .1, .25, 1);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== 通话舞台：亮色画布 + 两块磨砂窗 ===== */
+  .dsh-voice-call {
+    position: relative; height: 100vh;
+    display: grid; grid-template-columns: 380px 1fr; gap: 16px;
+    padding: 16px;
+    background: var(--canvas);
+    color: var(--ink);
+    overflow: hidden;
+  }
+  .dsh-voice-left, .dsh-voice-right {
+    border-radius: var(--radius-window);
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+    animation: dsh-tile-in .35s var(--ease) both;
+  }
+  .dsh-voice-right { animation-delay: .05s; }
+  @keyframes dsh-tile-in {
+    from { opacity: 0; transform: scale(.98); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* ===== 左栏：通话面板 ===== */
+  .dsh-voice-left {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 24px 24px;
+  }
+  .dsh-voice-topline {
+    align-self: flex-end;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; font-weight: 500;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dsh-voice-avatar-wrap {
+    position: relative; width: 120px; height: 120px; margin-top: 36px;
+    display: grid; place-items: center; flex: none;
+  }
+  .dsh-voice-avatar-circle {
+    width: 88px; height: 88px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: #fff;
+    border: 1px solid var(--hairline);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+    color: var(--ink);
+  }
+  .dsh-voice-whale { width: 46px; height: auto; display: block; }
+  .dsh-voice-avatar-wrap[data-phase="speaking"] .dsh-voice-whale {
+    animation: none; /* 幅度由 JS 逐帧驱动（音量呼吸） */
+    will-change: transform;
+  }
+
+  /* 签名元素：Voice-Memos 式实时波形（墨色圆头细柱，数据驱动） */
+  .dsh-voice-wave {
+    display: flex; align-items: center; justify-content: center;
+    gap: 5px; height: 56px; margin-top: 26px;
+  }
+  .dsh-voice-wave-bar {
+    width: 4px; border-radius: 2px; height: 6px;
+    background: var(--ink);
+    opacity: .85;
+    will-change: transform;
+  }
+  .dsh-voice-call[data-phase="thinking"] .dsh-voice-wave-bar,
+  .dsh-voice-call[data-phase="idle"] .dsh-voice-wave-bar { opacity: .25; }
+
+  .dsh-voice-state-word {
+    margin-top: 14px;
+    font-size: 15px; font-weight: 500;
+    color: var(--ink-2);
+  }
+
+  /* 实时转写 / 提示区 */
+  .dsh-voice-live {
+    min-height: 64px; margin-top: 18px; width: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    text-align: center; padding: 0 4px;
+  }
+  .dsh-voice-live > div {
+    max-height: 44px; overflow-y: auto; width: 100%;
+    font-size: 15px; line-height: 1.5;
+  }
+  .dsh-voice-live-interim { color: var(--ink); }
+  .dsh-voice-live-hint { color: var(--ink-3); font-size: 13px; }
+  .dsh-voice-live-warn { color: #B25000; font-size: 13px; }
+  .dsh-voice-live-error { color: var(--red); font-size: 13px; }
+
+  /* ===== 控制舱 ===== */
+  .dsh-voice-controls {
+    margin-top: auto;
+    width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    gap: 0; padding: 0;
+    border-radius: 18px;
+    background: var(--glass-strong);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
+    overflow: hidden;
+  }
+  .dsh-voice-ctl,
+  .dsh-voice-speak-toggle {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    height: 52px; padding: 0 16px;
+    font-size: 14px; color: var(--ink);
+    cursor: pointer; user-select: none;
+    border: none; background: none;
+    transition: background .15s var(--ease);
+  }
+  .dsh-voice-ctl:hover, .dsh-voice-speak-toggle:hover { background: rgba(0, 0, 0, .04); }
+  .dsh-voice-ctl + .dsh-voice-ctl,
+  .dsh-voice-speak-toggle + .dsh-voice-ctl,
+  .dsh-voice-ctl + .dsh-voice-speak-toggle { border-left: 1px solid var(--hairline); }
+  .dsh-voice-ctl-value { display: inline-flex; align-items: center; gap: 4px; }
+  .dsh-voice-ctl-value::after {
+    content: ''; width: 8px; height: 8px; margin-left: 2px;
+    border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+    transform: rotate(45deg) translateY(-2px);
+  }
+  .dsh-voice-ctl-select {
+    appearance: none; -webkit-appearance: none;
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; border: none; background: none; color: inherit;
+    font-size: 14px;
+  }
+  /* 自动播报：iOS 开关 */
+  .dsh-voice-speak-toggle { font-size: 14px; }
+  .dsh-voice-st-switch {
+    width: 40px; height: 24px; border-radius: 999px;
+    background: rgba(0, 0, 0, .15);
+    position: relative; transition: background .2s var(--ease);
+    flex: none;
+  }
+  .dsh-voice-st-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    transition: transform .2s var(--ease);
+  }
+  .dsh-voice-speak-toggle:not(.off) .dsh-voice-st-switch { background: #34C759; }
+  .dsh-voice-speak-toggle:not(.off) .dsh-voice-st-switch::after { transform: translateX(16px); }
+
+  .dsh-voice-hangup-row {
+    margin-top: 14px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .dsh-voice-hangup {
+    width: 54px; height: 54px; border-radius: 50%; cursor: pointer;
+    background: var(--red);
+    border: none;
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 12px rgba(255, 59, 48, .3);
+    transition: transform .1s var(--ease), filter .15s;
+  }
+  .dsh-voice-hangup:hover { filter: brightness(1.08); }
+  .dsh-voice-hangup:active { transform: scale(.95); }
+  .dsh-voice-skip {
+    border: none; background: none; cursor: pointer;
+    color: var(--blue); font-size: 14px;
+    padding: 0 4px;
+  }
+  .dsh-voice-skip.hidden { display: none; }
+
+  /* ===== 右栏：iMessage 式会话流 ===== */
+  .dsh-voice-right { min-width: 0; display: flex; }
+  .dsh-voice-stream {
+    flex: 1; overflow-y: auto; padding: 24px 28px 28px;
+    display: flex; flex-direction: column; gap: 14px;
+    scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
+  }
+  .dsh-voice-msg { display: flex; gap: 8px; align-items: flex-end; animation: dsh-msg-in .25s var(--ease) both; }
+  @keyframes dsh-msg-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  .dsh-voice-msg-avatar {
+    width: 28px; height: 28px; border-radius: 50%; flex: none;
+    background: #fff; border: 1px solid var(--hairline);
+    display: grid; place-items: center;
+    margin-bottom: 2px;
+  }
+  .dsh-voice-msg-avatar svg { width: 17px; height: auto; color: var(--ink); }
+  .dsh-voice-msg-user { justify-content: flex-end; }
+  .dsh-voice-msg-user .dsh-voice-bubble {
+    max-width: 70%;
+    background: var(--blue); color: #fff;
+    border-radius: 18px 18px 4px 18px;
+    padding: 9px 14px; font-size: 15px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .dsh-voice-msg-ai { max-width: 84%; }
+  .dsh-voice-msg-ai .dsh-voice-msg-body {
+    min-width: 0;
+    background: #E9E9EB; color: var(--ink);
+    border-radius: 4px 18px 18px 18px;
+    padding: 9px 14px;
+  }
+  .dsh-voice-prose {
+    margin: 0; font-size: 15px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .dsh-voice-prose + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-code, .dsh-voice-code + .dsh-voice-prose { margin-top: 8px; }
+  .dsh-voice-code {
+    margin: 0; padding: 10px 12px; border-radius: 10px; overflow-x: auto;
+    background: #292A30; border: none;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.6;
+    color: #F5F5F7; white-space: pre;
+  }
+  .dsh-voice-caret {
+    display: inline-block; width: 2px; height: 1em; margin-left: 1px;
+    background: rgba(0, 0, 0, .4); vertical-align: text-bottom;
+    animation: dsh-caret-blink 1s steps(1) infinite;
+  }
+  @keyframes dsh-caret-blink { 50% { opacity: 0; } }
+
+  /* iMessage 打字指示：全 UI 唯一的循环动画（语义：对方正在生成） */
+  .dsh-voice-typing {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 12px 14px;
+    background: #E9E9EB; border-radius: 4px 18px 18px 18px;
+  }
+  .dsh-voice-typing i {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ink-3);
+    animation: dsh-typing 1.2s ease-in-out infinite;
+  }
+  .dsh-voice-typing i:nth-child(2) { animation-delay: .15s; }
+  .dsh-voice-typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes dsh-typing {
+    0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-3px); }
+  }
+  .dsh-voice-call:not([data-phase="thinking"]) .dsh-voice-typing-row { display: none; }
+
+  /* 阶段驱动的显隐（真实组件由 React 条件渲染，demo 用 CSS 等价） */
+  .dsh-voice-live > div { display: none; }
+  .dsh-voice-call[data-phase="listening"] .dsh-voice-live-interim { display: block; }
+  .dsh-voice-call[data-phase="thinking"] .dsh-voice-live-hint-thinking { display: block; }
+  .dsh-voice-call[data-phase="speaking"] .dsh-voice-live-hint-speaking { display: block; }
+  .dsh-voice-call[data-phase="idle"] .dsh-voice-live-hint-idle { display: block; }
+  .dsh-voice-call:not([data-phase="speaking"]) .dsh-voice-skip { display: none; }
+  .dsh-voice-call:not([data-phase="thinking"]) .dsh-voice-streaming { display: none; }
+
+  /* ===== demo 顶栏（仅预览用） ===== */
+  .demo-bar {
+    position: fixed; top: 24px; right: 30px; z-index: 10000;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px; border-radius: var(--radius-pill);
+    background: var(--glass-strong);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .1);
+    font-size: 12px;
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+  }
+  .demo-bar em { font-style: normal; color: var(--ink-3); margin: 0 6px 0 8px; }
+  .demo-bar button {
+    border: none; border-radius: var(--radius-pill);
+    background: transparent; color: var(--ink-2);
+    font-size: 12px; padding: 6px 12px; cursor: pointer; transition: all .15s var(--ease);
+  }
+  .demo-bar button:hover { background: rgba(0, 0, 0, .05); color: var(--ink); }
+  .demo-bar button.is-on { background: var(--ink); color: #fff; }
+
+  @media (max-width: 860px) {
+    .dsh-voice-call { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 10px; gap: 10px; }
+    .dsh-voice-left { padding: 16px 18px 18px; }
+    .dsh-voice-avatar-wrap { width: 96px; height: 96px; margin-top: 18px; }
+    .dsh-voice-avatar-circle { width: 72px; height: 72px; }
+    .dsh-voice-whale { width: 38px; }
+    .dsh-voice-wave { height: 40px; margin-top: 16px; }
+    .dsh-voice-live { min-height: 48px; margin-top: 10px; }
+    .dsh-voice-stream { padding: 16px 14px 20px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dsh-voice-left, .dsh-voice-right, .dsh-voice-msg { animation: none !important; }
+    .dsh-voice-caret, .dsh-voice-typing i { animation: none !important; }
+    .dsh-voice-wave-bar { transform: none !important; }
+    .dsh-voice-whale { transform: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  <em>预览切换</em>
+  <button type="button" data-phase-btn="listening">聆听中</button>
+  <button type="button" data-phase-btn="thinking" class="is-on">思考中</button>
+  <button type="button" data-phase-btn="speaking">播报中</button>
+  <button type="button" data-phase-btn="idle">待命</button>
+</div>
+
+<div class="dsh-voice-call" data-phase="thinking">
+
+  <aside class="dsh-voice-left">
+    <div class="dsh-voice-topline">01:24</div>
+
+    <div class="dsh-voice-avatar-wrap" data-phase="thinking">
+      <div class="dsh-voice-avatar-circle" id="whale-slot"></div>
+    </div>
+
+    <div class="dsh-voice-wave" id="wave" aria-hidden="true"></div>
+
+    <div class="dsh-voice-state-word" id="state-word">思考中</div>
+
+    <div class="dsh-voice-live" aria-live="polite">
+      <div class="dsh-voice-live-interim">帮我把这段代码改成异步的，注意错误处理</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-thinking">正在组织回复…</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-speaking">正在播报</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-idle">说话即发送</div>
+    </div>
+
+    <div class="dsh-voice-controls">
+      <button type="button" class="dsh-voice-speak-toggle" id="auto-speak" title="朗读每轮回复的结论">
+        <span class="dsh-voice-st-switch" aria-hidden="true"></span>自动播报
+      </button>
+      <label class="dsh-voice-ctl" title="说话人">
+        <select class="dsh-voice-ctl-select" id="speaker" aria-label="说话人">
+          <optgroup label="普通话">
+            <option value="Cherry" selected>Cherry</option>
+            <option value="Serena">Serena</option>
+            <option value="Ethan">Ethan</option>
+          </optgroup>
+          <optgroup label="方言">
+            <option value="Suiyao">苏瑶（粤语）</option>
+            <option value="Chenxu">晨煦（吴语）</option>
+          </optgroup>
+        </select>
+        <span class="dsh-voice-ctl-value" id="speaker-label">Cherry</span>
+      </label>
+      <label class="dsh-voice-ctl" title="语速（仅本会话）">
+        <select class="dsh-voice-ctl-select" id="rate" aria-label="语速">
+          <option value="1.0" selected>1.0x</option>
+          <option value="1.2">1.2x</option>
+          <option value="1.5">1.5x</option>
+          <option value="1.8">1.8x</option>
+          <option value="2.0">2.0x</option>
+        </select>
+        <span class="dsh-voice-ctl-value" id="rate-label">1.0x</span>
+      </label>
+    </div>
+
+    <div class="dsh-voice-hangup-row">
+      <button type="button" class="dsh-voice-hangup" title="结束语音对话（Esc）" aria-label="结束语音对话">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+        </svg>
+      </button>
+      <button type="button" class="dsh-voice-skip">跳过播报</button>
+    </div>
+  </aside>
+
+  <section class="dsh-voice-right" aria-label="会话内容">
+    <div class="dsh-voice-stream" id="stream">
+      <div class="dsh-voice-msg dsh-voice-msg-user">
+        <div class="dsh-voice-bubble">你好，帮我写一个防抖函数</div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-ai">
+        <div class="dsh-voice-msg-avatar" id="av1"></div>
+        <div class="dsh-voice-msg-body">
+          <p class="dsh-voice-prose">好的，这是一个标准的防抖实现：利用闭包保存计时器，每次触发时重置延迟，停止触发达到设定时间后才真正执行。</p>
+          <pre class="dsh-voice-code"><code>function debounce(fn, delay = 300) {
+  let timer = null
+  return function (...args) {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
+  }
+}</code></pre>
+          <p class="dsh-voice-prose">适用于搜索框输入、窗口缩放等高频触发场景。</p>
+        </div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-user">
+        <div class="dsh-voice-bubble">那再写一个节流，要支持 leading 和 trailing 两种模式</div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-ai dsh-voice-streaming" id="streaming-msg">
+        <div class="dsh-voice-msg-avatar" id="av2"></div>
+        <div class="dsh-voice-msg-body">
+          <p class="dsh-voice-prose" id="streaming-text"></p>
+        </div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-ai dsh-voice-typing-row" id="typing-row">
+        <div class="dsh-voice-msg-avatar" id="av3"></div>
+        <div class="dsh-voice-typing" aria-label="正在生成"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ===== demo 专用：波形引擎（数据驱动，仅聆听/播报时动）+ 鲸鱼呼吸 + 阶段切换 =====
+(function () {
+  var WHALE = "<svg class=\"dsh-voice-whale\" viewBox=\"0 0 23.16 17.04\" fill=\"none\" aria-hidden=\"true\"><path d=\"M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z\" fill=\"currentColor\"></path></svg>";
+  var SMALL = "<svg viewBox=\"0 0 23.16 17.04\" fill=\"none\" aria-hidden=\"true\"><path d=\"M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z\" fill=\"currentColor\"></path></svg>";
+  document.getElementById('whale-slot').innerHTML = WHALE;
+  document.getElementById('av1').innerHTML = SMALL;
+  document.getElementById('av2').innerHTML = SMALL;
+  document.getElementById('av3').innerHTML = SMALL;
+
+  var call = document.querySelector('.dsh-voice-call');
+  var wrap = document.querySelector('.dsh-voice-avatar-wrap');
+  var whale = document.querySelector('#whale-slot svg');
+  var BARS = 15;
+  var wave = document.getElementById('wave');
+  var barEls = [];
+  for (var i = 0; i < BARS; i++) {
+    var b = document.createElement('div');
+    b.className = 'dsh-voice-wave-bar';
+    wave.appendChild(b);
+    barEls.push(b);
+  }
+
+  var t = 0, amp = 0.3;
+  function phase() { return call.dataset.phase; }
+
+  // 程序化振幅：语音式簇（聆听）、脉冲（播报）、微息（思考/待命）
+  function procAmp(p) {
+    switch (p) {
+      case 'listening': {
+        var cluster = Math.pow(Math.abs(Math.sin(t * 1.9 + 1)), 2.2);
+        return 0.15 + 0.85 * cluster * (0.6 + 0.4 * Math.sin(t * 13));
+      }
+      case 'speaking': {
+        var pulse = Math.pow(Math.abs(Math.sin(t * 4.4)), 2);
+        return 0.3 + 0.7 * pulse;
+      }
+      case 'thinking': return 0.12 + 0.04 * Math.sin(t * 1.1);
+      default: return 0.08;
+    }
+  }
+
+  function tick() {
+    t += 1 / 60;
+    var p = phase();
+    amp += (procAmp(p) - amp) * 0.12;
+    var center = (BARS - 1) / 2;
+    var active = (p === 'listening' || p === 'speaking');
+    for (var i = 0; i < BARS; i++) {
+      var spread = Math.abs(i - center) / center;
+      var jitter = 0.5 + 0.5 * Math.abs(Math.sin(t * 9 + i * 1.7));
+      var shape = 1.18 - spread * 0.85;
+      var h;
+      if (p === 'listening') h = 6 + amp * 40 * shape * (0.55 + 0.45 * jitter);
+      else if (p === 'speaking') h = 8 + amp * 44 * shape * (0.45 + 0.55 * jitter);
+      else if (p === 'thinking') h = 6 + amp * 10 * shape;
+      else h = 5;
+      barEls[i].style.transform = 'scaleY(' + (h / 6).toFixed(3) + ')';
+    }
+    // 鲸鱼呼吸：仅播报时随振幅轻微缩放
+    if (p === 'speaking') whale.style.transform = 'scale(' + (1 + amp * 0.06).toFixed(3) + ')';
+    else whale.style.transform = '';
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // 阶段切换
+  var WORDS = { idle: '待命', listening: '聆听中', thinking: '思考中', speaking: '播报中' };
+  var STREAM_FULL = '节流和防抖的区别在于保证执行频率：防抖是"停手后才执行"，节流是"最多每 N 毫秒执行一次"。下面是同时支持 leading 与 trailing 的完整实现……（流式生成示意：思考阶段逐字生长，其余阶段完整显示）';
+  var shown = 0;
+  var streamText = document.getElementById('streaming-text');
+
+  function renderStream() {
+    streamText.textContent = STREAM_FULL.slice(0, shown);
+    if (shown < STREAM_FULL.length) {
+      streamText.insertAdjacentHTML('beforeend', '<span class="dsh-voice-caret" aria-hidden="true"></span>');
+    }
+  }
+  setInterval(function () {
+    if (phase() !== 'thinking') return;
+    shown = Math.min(STREAM_FULL.length, shown + 2);
+    renderStream();
+  }, 50);
+
+  document.querySelectorAll('[data-phase-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var p = btn.dataset.phaseBtn;
+      call.dataset.phase = p;
+      wrap.dataset.phase = p;
+      document.getElementById('state-word').textContent = WORDS[p];
+      document.querySelectorAll('[data-phase-btn]').forEach(function (b) { b.classList.toggle('is-on', b === btn); });
+      if (p === 'thinking' && shown >= STREAM_FULL.length) shown = 0;
+      if (p !== 'thinking') { shown = STREAM_FULL.length; renderStream(); }
+    });
+  });
+
+  // 控制舱：开关 / 音色 / 语速（真实组件由 controller 接管）
+  var auto = document.getElementById('auto-speak');
+  auto.addEventListener('click', function () { auto.classList.toggle('off'); });
+  var speaker = document.getElementById('speaker');
+  speaker.addEventListener('change', function () {
+    document.getElementById('speaker-label').textContent = speaker.options[speaker.selectedIndex].text;
+  });
+  var rate = document.getElementById('rate');
+  rate.addEventListener('change', function () {
+    document.getElementById('rate-label').textContent = rate.value + 'x';
+  });
+
+  // 计时器
+  var sec = 84;
+  setInterval(function () {
+    sec++;
+    var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    var ss = String(sec % 60).padStart(2, '0');
+    document.querySelector('.dsh-voice-topline').textContent = mm + ':' + ss;
+  }, 1000);
+})();
+</script>
+</body>
+</html>
