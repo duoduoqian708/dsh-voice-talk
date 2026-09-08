@@ -68,8 +68,12 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .dsh-voice-hero {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; width: 100%; margin-top: 40px; flex: none;
+  }
   .dsh-voice-avatar-wrap {
-    position: relative; width: 120px; height: 120px; margin-top: 36px;
+    position: relative; width: 96px; height: 96px;
     display: grid; place-items: center; flex: none;
   }
   .dsh-voice-avatar-circle {
@@ -88,8 +92,9 @@
 
   /* 签名元素：Voice-Memos 式实时波形（墨色圆头细柱，数据驱动） */
   .dsh-voice-wave {
-    display: flex; align-items: center; justify-content: center;
-    gap: 5px; height: 56px; margin-top: 26px;
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 4px; height: 56px; margin: 0;
   }
   .dsh-voice-wave-bar {
     width: 4px; border-radius: 2px; height: 6px;
@@ -178,8 +183,8 @@
   .dsh-voice-speak-toggle:not(.off) .dsh-voice-st-switch::after { transform: translateX(16px); }
 
   .dsh-voice-hangup-row {
-    margin-top: 14px;
-    display: flex; align-items: center; gap: 14px;
+    margin-top: 14px; min-height: 22px;
+    display: flex; align-items: center; justify-content: center;
   }
   .dsh-voice-hangup {
     width: 54px; height: 54px; border-radius: 50%; cursor: pointer;
@@ -188,7 +193,7 @@
     color: #fff;
     display: inline-flex; align-items: center; justify-content: center;
     box-shadow: 0 4px 12px rgba(255, 59, 48, .3);
-    transition: transform .1s var(--ease), filter .15s;
+    transition: filter .15s; /* transform 由 JS 逐帧驱动（呼吸），不参与过渡 */
   }
   .dsh-voice-hangup:hover { filter: brightness(1.08); }
   .dsh-voice-hangup:active { transform: scale(.95); }
@@ -276,7 +281,7 @@
   .dsh-voice-call[data-phase="thinking"] .dsh-voice-live-hint-thinking { display: block; }
   .dsh-voice-call[data-phase="speaking"] .dsh-voice-live-hint-speaking { display: block; }
   .dsh-voice-call[data-phase="idle"] .dsh-voice-live-hint-idle { display: block; }
-  .dsh-voice-call:not([data-phase="speaking"]) .dsh-voice-skip { display: none; }
+  .dsh-voice-call:not([data-phase="speaking"]) .dsh-voice-skip { visibility: hidden; }
   .dsh-voice-call:not([data-phase="thinking"]) .dsh-voice-streaming { display: none; }
 
   /* ===== demo 顶栏（仅预览用） ===== */
@@ -303,10 +308,12 @@
   @media (max-width: 860px) {
     .dsh-voice-call { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 10px; gap: 10px; }
     .dsh-voice-left { padding: 16px 18px 18px; }
-    .dsh-voice-avatar-wrap { width: 96px; height: 96px; margin-top: 18px; }
-    .dsh-voice-avatar-circle { width: 72px; height: 72px; }
-    .dsh-voice-whale { width: 38px; }
-    .dsh-voice-wave { height: 40px; margin-top: 16px; }
+    .dsh-voice-hero { gap: 12px; margin-top: 20px; }
+    .dsh-voice-avatar-wrap { width: 76px; height: 76px; }
+    .dsh-voice-avatar-circle { width: 68px; height: 68px; }
+    .dsh-voice-whale { width: 36px; }
+    .dsh-voice-wave { height: 40px; }
+    .dsh-voice-hangup { width: 46px; height: 46px; }
     .dsh-voice-live { min-height: 48px; margin-top: 10px; }
     .dsh-voice-stream { padding: 16px 14px 20px; }
   }
@@ -315,6 +322,7 @@
     .dsh-voice-caret, .dsh-voice-typing i { animation: none !important; }
     .dsh-voice-wave-bar { transform: none !important; }
     .dsh-voice-whale { transform: none !important; }
+    .dsh-voice-hangup { transform: none !important; }
   }
 </style>
 </head>
@@ -333,11 +341,19 @@
   <aside class="dsh-voice-left">
     <div class="dsh-voice-topline">01:24</div>
 
-    <div class="dsh-voice-avatar-wrap" data-phase="thinking">
-      <div class="dsh-voice-avatar-circle" id="whale-slot"></div>
-    </div>
+    <div class="dsh-voice-hero">
+      <div class="dsh-voice-avatar-wrap" data-phase="thinking">
+        <div class="dsh-voice-avatar-circle" id="whale-slot"></div>
+      </div>
 
-    <div class="dsh-voice-wave" id="wave" aria-hidden="true"></div>
+      <div class="dsh-voice-wave" id="wave" aria-hidden="true"></div>
+
+      <button type="button" class="dsh-voice-hangup" id="hangup" title="结束语音对话（Esc）" aria-label="结束语音对话">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+        </svg>
+      </button>
+    </div>
 
     <div class="dsh-voice-state-word" id="state-word">思考中</div>
 
@@ -349,9 +365,6 @@
     </div>
 
     <div class="dsh-voice-controls">
-      <button type="button" class="dsh-voice-speak-toggle" id="auto-speak" title="朗读每轮回复的结论">
-        <span class="dsh-voice-st-switch" aria-hidden="true"></span>自动播报
-      </button>
       <label class="dsh-voice-ctl" title="说话人">
         <select class="dsh-voice-ctl-select" id="speaker" aria-label="说话人">
           <optgroup label="普通话">
@@ -379,11 +392,6 @@
     </div>
 
     <div class="dsh-voice-hangup-row">
-      <button type="button" class="dsh-voice-hangup" title="结束语音对话（Esc）" aria-label="结束语音对话">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
-        </svg>
-      </button>
       <button type="button" class="dsh-voice-skip">跳过播报</button>
     </div>
   </aside>
@@ -437,8 +445,9 @@
   var call = document.querySelector('.dsh-voice-call');
   var wrap = document.querySelector('.dsh-voice-avatar-wrap');
   var whale = document.querySelector('#whale-slot svg');
-  var BARS = 15;
+  var BARS = 19;
   var wave = document.getElementById('wave');
+  var hangupBtn = document.getElementById('hangup');
   var barEls = [];
   for (var i = 0; i < BARS; i++) {
     var b = document.createElement('div');
@@ -483,9 +492,11 @@
       else h = 5;
       barEls[i].style.transform = 'scaleY(' + (h / 6).toFixed(3) + ')';
     }
-    // 鲸鱼呼吸：仅播报时随振幅轻微缩放
+    // 双向呼吸：谁在说话，谁的代表就随振幅起伏
     if (p === 'speaking') whale.style.transform = 'scale(' + (1 + amp * 0.06).toFixed(3) + ')';
     else whale.style.transform = '';
+    if (p === 'listening') hangupBtn.style.transform = 'scale(' + (1 + amp * 0.08).toFixed(3) + ')';
+    else hangupBtn.style.transform = '';
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
@@ -520,9 +531,7 @@
     });
   });
 
-  // 控制舱：开关 / 音色 / 语速（真实组件由 controller 接管）
-  var auto = document.getElementById('auto-speak');
-  auto.addEventListener('click', function () { auto.classList.toggle('off'); });
+  // 控制舱：音色 / 语速（真实组件由 controller 接管；主动播报无需开关）
   var speaker = document.getElementById('speaker');
   speaker.addEventListener('change', function () {
     document.getElementById('speaker-label').textContent = speaker.options[speaker.selectedIndex].text;
