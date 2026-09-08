@@ -53,22 +53,22 @@
   }
   /* 折叠把手：悬浮于右缘，独立于右栏（折叠后仍可点回） */
   .dsh-voice-collapse {
-    position: absolute; top: 50%; right: 12px;
+    position: absolute; top: 50%; right: 14px;
     transform: translateY(-50%);
-    width: 26px; height: 56px;
-    border: 1px solid var(--hairline);
+    width: 32px; height: 64px;
+    border: 1px solid rgba(0, 0, 0, .12);
     border-radius: var(--radius-pill);
-    background: var(--glass-strong);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .14);
     display: grid; place-items: center;
     cursor: pointer; padding: 0;
-    transition: background .15s var(--ease);
+    transition: background .15s var(--ease), transform .15s var(--ease);
     z-index: 10;
   }
-  .dsh-voice-collapse:hover { background: #fff; }
+  .dsh-voice-collapse:hover { background: #fff; transform: translateY(-50%) scale(1.06); }
   .dsh-voice-collapse i {
-    width: 8px; height: 8px;
-    border-left: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+    width: 9px; height: 9px;
+    border-left: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2);
     transition: transform .3s var(--ease);
     transform: rotate(-45deg) scale(.9);
     margin-right: -2px;
@@ -92,7 +92,7 @@
     backdrop-filter: blur(20px) saturate(1.8);
     border: 1px solid var(--hairline);
     box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
-    animation: dsh-tile-in .35s var(--ease) both;
+    animation: dsh-tile-in .35s var(--ease) backwards;
   }
   .dsh-voice-right { animation-delay: .05s; }
   @keyframes dsh-tile-in {
@@ -110,22 +110,22 @@
   }
 
   .dsh-voice-hero {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 20px; width: 100%; margin-top: 40px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    gap: 18px; width: 100%; margin-top: 40px; flex: none;
   }
   .dsh-voice-avatar-wrap {
-    position: relative; width: 96px; height: 96px;
+    position: relative; width: 84px; height: 84px;
     display: grid; place-items: center; flex: none;
   }
   .dsh-voice-avatar-circle {
-    width: 88px; height: 88px; border-radius: 50%;
+    width: 72px; height: 72px; border-radius: 50%;
     display: grid; place-items: center;
     background: #fff;
     border: 1px solid var(--hairline);
     box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
     color: var(--ink);
   }
-  .dsh-voice-whale { width: 46px; height: auto; display: block; }
+  .dsh-voice-whale { width: 38px; height: auto; display: block; }
   /* 呼吸光晕：主体背后的 blur 圈，opacity/transform 由 JS 驱动（放大时边缘晕开） */
   .dsh-voice-halo {
     position: absolute; inset: -20%;
@@ -146,7 +146,7 @@
 
   /* 签名元素：Voice-Memos 式实时波形（墨色圆头细柱，数据驱动） */
   .dsh-voice-wave {
-    flex: 1; min-width: 0;
+    flex: 0 0 170px; min-width: 0;
     display: flex; align-items: center; justify-content: space-between;
     gap: 4px; height: 56px; margin: 0;
   }
@@ -241,7 +241,7 @@
     display: flex; align-items: center; justify-content: center;
   }
   .dsh-voice-hangup {
-    width: 54px; height: 54px; border-radius: 50%; cursor: pointer;
+    width: 72px; height: 72px; border-radius: 50%; cursor: pointer;
     background: var(--red);
     border: none;
     color: #fff;
@@ -565,20 +565,20 @@
     //   ampSlow = 重滤波音量（说话时饱满鼓起，停顿缓缓回落，不抖）
     var breath = 0.5 + 0.5 * Math.sin(t * (Math.PI * 2) / 3.6 - Math.PI / 2); // 0..1，从谷起步
     ampSlow += (amp - ampSlow) * 0.06;
-    var drive = breath * 0.02 + ampSlow * 0.05;
+    var drive = breath * 0.035 + ampSlow * 0.075; // 峰值 ~11%，肉眼明确可见
 
     if (p === 'speaking') {
       whale.style.transform = 'scale(' + (1 + drive).toFixed(4) + ')';
-      haloWhale.style.opacity = (0.18 + drive * 5.2).toFixed(3);
-      haloWhale.style.transform = 'scale(' + (1 + drive * 0.9).toFixed(4) + ')';
+      haloWhale.style.opacity = (0.2 + drive * 4.6).toFixed(3);
+      haloWhale.style.transform = 'scale(' + (1 + drive * 0.8).toFixed(4) + ')';
     } else {
       whale.style.transform = '';
       haloWhale.style.opacity = '0';
     }
     if (p === 'listening') {
-      hangupBtn.style.transform = 'scale(' + (1 + drive * 1.15).toFixed(4) + ')';
-      haloPhone.style.opacity = (0.18 + drive * 5.5).toFixed(3);
-      haloPhone.style.transform = 'scale(' + (1 + drive * 0.9).toFixed(4) + ')';
+      hangupBtn.style.transform = 'scale(' + (1 + drive * 1.1).toFixed(4) + ')';
+      haloPhone.style.opacity = (0.2 + drive * 4.8).toFixed(3);
+      haloPhone.style.transform = 'scale(' + (1 + drive * 0.8).toFixed(4) + ')';
     } else {
       hangupBtn.style.transform = '';
       haloPhone.style.opacity = '0';
