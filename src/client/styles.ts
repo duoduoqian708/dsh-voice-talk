@@ -184,9 +184,9 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 }
 @keyframes dsh-veil-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* ---- left: the call face ---- */
+/* ---- left: the call face (half the stage; full stage when collapsed) ---- */
 .dsh-voice-left {
-  flex: 0 0 380px;
+  flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center;
   padding: 20px 20px 24px;
   border-radius: 28px;
@@ -243,7 +243,7 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 
 /* signature element: voice-memos waveform (ink, round-capped bars) */
 .dsh-voice-wave {
-  flex: 0 0 170px; min-width: 0;
+  flex: 1 1 auto; min-width: 120px; max-width: 320px;
   display: flex; align-items: center; justify-content: space-between;
   gap: 4px; height: 56px; margin: 0;
 }
@@ -295,7 +295,7 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 /* ---- controls pill: speaker + rate (session-scope) ---- */
 .dsh-voice-controls {
   margin-top: auto;
-  width: 100%;
+  width: 100%; max-width: 420px;
   display: flex; align-items: center; justify-content: center;
   border-radius: 18px;
   background: rgba(255, 255, 255, .92);

@@ -27,6 +27,8 @@ export interface TranscriptMessage {
   /** Conversation-node seq (stable React key). */
   readonly seq: number
   readonly role: 'user' | 'assistant'
+  /** Turn id — consecutive assistant nodes of one turn merge into one bubble. */
+  readonly turn: number
   /** Plain text content (text blocks joined; markdown kept as-is). */
   readonly text: string
 }

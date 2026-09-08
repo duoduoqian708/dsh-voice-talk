@@ -253,7 +253,10 @@ export class ChromeRecognizer implements Recognizer {
         }
         this.#restarting = false
         try {
-          recognition.stop()
+          // abort(), not stop(): stop() flushes Chrome's recognition buffer as
+          // a final result — after a hang-up that tail would land in the
+          // composer and send. abort() discards the buffer silently.
+          recognition.abort()
         } catch {
           // already stopped
         }

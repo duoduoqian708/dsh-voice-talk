@@ -121,9 +121,25 @@ export function transcriptOf(snapshot: ConversationSnapshot): TranscriptState {
   const messages: TranscriptMessage[] = []
   for (const node of snapshot.nodes) {
     if (node.kind === 'user') {
-      messages.push({ seq: node.seq, role: 'user', text: nodeText(node.content as unknown as readonly { kind: string; text?: string }[]) })
+      messages.push({
+        seq: node.seq, turn: -1, role: 'user',
+        text: nodeText(node.content as unknown as readonly { kind: string; text?: string }[]),
+      })
     } else if (node.kind === 'assistant') {
-      messages.push({ seq: node.seq, role: 'assistant', text: nodeText(node.blocks) })
+      // One turn often emits several assistant nodes (prose, tool-call
+      // interludes, retry outputs); the native stream reads them as ONE
+      // message. Fold consecutive same-turn nodes so the stream shows a
+      // single avatar + bubble per turn instead of one per node.
+      const last = messages[messages.length - 1]
+      const text = nodeText(node.blocks)
+      if (last !== undefined && last.role === 'assistant' && last.turn === node.turn) {
+        messages[messages.length - 1] = {
+          ...last,
+          text: last.text === '' ? text : last.text.endsWith('\n') ? last.text + text : `${last.text}\n\n${text}`,
+        }
+      } else {
+        messages.push({ seq: node.seq, turn: node.turn, role: 'assistant', text })
+      }
     }
   }
   const partial = snapshot.partial
@@ -314,6 +330,9 @@ export class VoiceController {
 
   #onFinalUtterance(text: string): void {
     if (text === '') return
+    // Guard every entry: a late final can arrive after the loop is gone
+    // (abort races, timeout degrade) — it must never reach the composer.
+    if (this.status.getSnapshot().mode !== 'loop') return
     if (this.#speaking) {
       const settings = resolveSettings(this.#deps.settings())
       const armed = settings.allowInterrupt
@@ -383,6 +402,8 @@ export class VoiceController {
     }
     const text = this.#pendingFinal
     this.#pendingFinal = null
+    // The flush timer can outlive a hang-up by a beat; never submit then.
+    if (this.status.getSnapshot().mode !== 'loop') return
     if (text === null || text.length < MIN_UTTERANCE_CHARS) return
     this.#submitUtterance(text)
   }
