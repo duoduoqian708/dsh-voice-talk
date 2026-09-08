@@ -34,10 +34,10 @@ const CSS = `
 .dsh-voice-row-value { font-size: 13px; opacity: .7; }
 .dsh-voice-switch {
   width: 40px; height: 22px; padding: 0; border-radius: 999px; border: none;
-  background: rgba(15, 17, 21, .18); cursor: pointer; position: relative;
+  background: rgba(0, 0, 0, .15); cursor: pointer; position: relative;
   transition: background .2s ease; flex: none;
 }
-.dsh-voice-switch.is-on { background: #0F1115; }
+.dsh-voice-switch.is-on { background: #34C759; }
 .dsh-voice-switch:disabled { opacity: .4; cursor: default; }
 .dsh-voice-switch-knob {
   position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
@@ -50,14 +50,121 @@ const CSS = `
   border: 1px solid rgba(15, 17, 21, .16); background: #fff; color: #0F1115;
   transition: border-color .15s ease;
 }
-.dsh-voice-input:focus { outline: none; border-color: rgba(15, 17, 21, .7); }
-.dsh-voice-card-warn { margin: 0; font-size: 11px; color: #e0a24a; }
-.dsh-voice-card-hint { margin: 0; opacity: .5; font-size: 11px; }
+.dsh-voice-input:focus { outline: none; border-color: #007AFF; }
+.dsh-voice-card-warn { margin: 0; font-size: 11px; color: #B25000; }
+.dsh-voice-card-hint { margin: 0; color: #86868B; font-size: 11px; }
 .dsh-voice-card-overrides { display: flex; flex-wrap: wrap; gap: 6px; }
 .dsh-voice-reset {
   border: none; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer;
   background: color-mix(in srgb, currentColor 10%, transparent); color: inherit;
 }
+
+/* ---- settings card: engine setup guide ---- */
+.dsh-voice-setup { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, .03); }
+.dsh-voice-setup-note { margin: 0; font-size: 12px; color: #6E6E73; }
+.dsh-voice-setup-link { color: #007AFF; text-decoration: none; }
+.dsh-voice-setup-link:hover { text-decoration: underline; }
+.dsh-voice-setup-ok { font-size: 11px; color: #34C759; margin-left: 6px; }
+.dsh-voice-setup-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ---- settings card: provider cards ---- */
+.dsh-voice-providers { display: grid; gap: 10px; }
+.dsh-voice-group {
+  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, .08);
+  background: #fff;
+}
+.dsh-voice-group-title { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #6E6E73; }
+.dsh-voice-provider {
+  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, .08);
+  background: #fff;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dsh-voice-provider.is-active {
+  border-color: rgba(0, 122, 255, .55);
+  box-shadow: 0 0 0 1px rgba(0, 122, 255, .25) inset;
+}
+.dsh-voice-provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dsh-voice-provider-name { font-size: 13px; font-weight: 600; }
+.dsh-voice-provider-status { font-size: 11px; color: #86868B; }
+.dsh-voice-provider-status.is-missing { color: #B25000; }
+.dsh-voice-provider-note { margin: 0; font-size: 11px; color: #86868B; line-height: 1.6; }
+.dsh-voice-provider-actions { display: flex; align-items: center; gap: 8px; }
+.dsh-voice-provider-btn {
+  border: none; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer;
+  background: rgba(0, 0, 0, .06); color: #1D1D1F;
+  transition: background .15s;
+}
+.dsh-voice-provider-btn:hover { background: rgba(0, 0, 0, .1); }
+.dsh-voice-provider-btn:disabled { opacity: .4; cursor: default; }
+.dsh-voice-provider-btn.is-primary { background: #007AFF; color: #fff; }
+.dsh-voice-provider-btn.is-primary:hover { background: #0071EB; }
+
+/* ---- settings card: provider settings modal ----
+   Light panel, 24px radius, hairline shadow; dark adapts via the host's
+   body[data-ds-dark-theme] attribute (the theme presenter sets it). */
+.dsh-voice-modal-veil {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0, 0, 0, .35);
+  display: flex; align-items: center; justify-content: center;
+  animation: dsh-veil-in .2s ease both;
+}
+.dsh-voice-modal {
+  width: min(520px, calc(100vw - 48px)); max-height: 82vh; overflow-y: auto;
+  display: grid; gap: 12px; padding: 24px; border-radius: 24px;
+  background: #fff; color: #1D1D1F;
+  box-shadow:
+    rgba(0, 0, 0, .2) 0 0 1px 0,
+    rgba(0, 0, 0, .08) 0 8px 24px 0,
+    rgba(0, 0, 0, .05) 0 2px 8px 0;
+  animation: dsh-modal-in .22s cubic-bezier(.22, 1, .36, 1) backwards;
+}
+@keyframes dsh-modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+.dsh-voice-modal-head { display: flex; align-items: center; justify-content: space-between; }
+.dsh-voice-modal-title { margin: 0; font-size: 16px; font-weight: 600; }
+.dsh-voice-modal-close {
+  width: 28px; height: 28px; border: none; border-radius: 8px; cursor: pointer;
+  background: transparent; color: inherit; font-size: 15px; line-height: 1; opacity: .55;
+}
+.dsh-voice-modal-close:hover { background: rgba(0, 0, 0, .06); opacity: 1; }
+.dsh-voice-modal-hint { font-size: 11px; color: #86868B; }
+.dsh-voice-modal-divider {
+  display: flex; align-items: center; gap: 10px; margin-top: 2px;
+  font-size: 12px; font-weight: 600; letter-spacing: .08em; color: #6E6E73;
+}
+.dsh-voice-modal-divider::after {
+  content: ''; flex: 1; height: 1px; background: rgba(0, 0, 0, .1);
+}
+.dsh-voice-modal-footer { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.dsh-voice-input-wide { flex: 1; max-width: none; min-width: 0; }
+.dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
+.dsh-voice-modal select.dsh-voice-input { max-width: none; flex: 1; }
+.dsh-voice-cred-cell { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dsh-voice-cred-badge {
+  flex: none; font-size: 11px; color: #34C759;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(52, 199, 89, .12);
+}
+
+/* host dark theme: adapt card surfaces (the presenter sets the attribute) */
+body[data-ds-dark-theme] .dsh-voice-card,
+body[data-ds-dark-theme] .dsh-voice-modal { color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-group,
+body[data-ds-dark-theme] .dsh-voice-provider,
+body[data-ds-dark-theme] .dsh-voice-setup { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
+body[data-ds-dark-theme] .dsh-voice-group-title,
+body[data-ds-dark-theme] .dsh-voice-provider-note,
+body[data-ds-dark-theme] .dsh-voice-provider-status,
+body[data-ds-dark-theme] .dsh-voice-modal-hint,
+body[data-ds-dark-theme] .dsh-voice-card-hint { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-provider-btn { background: rgba(255, 255, 255, .08); color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-provider-btn:hover { background: rgba(255, 255, 255, .14); }
+body[data-ds-dark-theme] .dsh-voice-provider-btn.is-primary { background: #007AFF; color: #fff; }
+body[data-ds-dark-theme] .dsh-voice-input { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .14); color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-input:focus { border-color: rgba(255, 255, 255, .45); }
+body[data-ds-dark-theme] .dsh-voice-switch { background: rgba(255, 255, 255, .2); }
+body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgba(0, 0, 0, .5) 0 0 1px 0, rgba(0, 0, 0, .4) 0 8px 24px 0; }
 
 /* ---- call overlay: light canvas, two glass tiles ----
    Performance contract: the canvas is a STATIC opaque light gradient (no

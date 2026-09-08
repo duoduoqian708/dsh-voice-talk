@@ -10,7 +10,7 @@
 // with a halo that opens up the edges. All motion is transform/opacity.
 
 import { createPortal } from 'react-dom'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
@@ -101,7 +101,6 @@ function Hero({ useVoice, hangUp, phase }: { useVoice: VoiceSelectorHook; hangUp
       whale: whaleEl, key: keyEl, haloWhale: haloWhaleEl, haloKey: haloKeyEl,
     }, waveEl, () => phaseRef.current)
     breathRef.current = breath
-    if (phaseRef.current === 'listening') void breath.attachMic()
     breath.start()
     return () => {
       breath.dispose()
@@ -113,7 +112,6 @@ function Hero({ useVoice, hangUp, phase }: { useVoice: VoiceSelectorHook; hangUp
     const breath = breathRef.current
     if (breath == null) return
     breath.setPhase(phase)
-    if (phase === 'listening') void breath.attachMic()
   }, [phase])
 
   return (
@@ -191,11 +189,19 @@ export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRat
   const themeId = settings().ttsTheme
 
   // Transcript subscription: the store is change-gated, so the snapshot
-  // reference only moves when content actually changed.
-  const streamState = useSyncExternalStore(
-    transcript?.subscribe ?? subscribeNoop,
-    transcript?.getSnapshot ?? snapshotNoop,
+  // reference only moves when content actually changed. The store's methods
+  // are class members with private state — passing them detached hands React
+  // a `this`-less function (the '#snapshot' crash); bind through closures and
+  // memoize on the store identity so React keeps one subscription.
+  const subscribe = useMemo(
+    () => transcript === undefined ? subscribeNoop : (listener: () => void) => transcript.subscribe(listener),
+    [transcript],
   )
+  const getSnapshot = useMemo(
+    () => transcript === undefined ? snapshotNoop : () => transcript.getSnapshot(),
+    [transcript],
+  )
+  const streamState = useSyncExternalStore(subscribe, getSnapshot)
   const messages = streamState.messages
   const streaming = streamState.streaming
 

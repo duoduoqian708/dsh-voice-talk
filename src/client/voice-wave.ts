@@ -56,6 +56,10 @@ export class CallBreath {
       waveContainer.appendChild(bar)
       this.#bars.push(bar)
     }
+    // Hold ONE mic capture for the whole call: attach at mount, release at
+    // dispose. Per-phase capture churn made the system recording indicator
+    // flicker; a held capture keeps it steady and kills re-open latency.
+    void this.attachMic()
   }
 
   /** Mount the live mic analyser (silently degrades to procedural motion). */
