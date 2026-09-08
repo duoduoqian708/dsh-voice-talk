@@ -25,7 +25,9 @@ const MIN_UTTERANCE_CHARS = 2
 /** Barge-in arming delay: ignore capture transients right after playback starts. */
 const BARGE_IN_ARM_MS = 500
 /** Re-arm delay after playback ends, so the speaker tail decays before listening. */
-const REARM_COOLDOWN_MS = 400
+const REARM_COOLDOWN_MS = 900
+/** Window after a readout during which re-armed listening still runs the echo guard. */
+const ECHO_TAIL_WINDOW_MS = 3_500
 /** Give up watching for a reply after this long (stuck turn, provider error). */
 const REPLY_TIMEOUT_MS = 120_000
 /** Minimum cleaned prose before a sentence boundary is worth a synthesis call. */
@@ -165,6 +167,11 @@ export class VoiceController {
   #speaking = false
   #speakingSince = 0
   #spokenText: string | null = null
+  /** Text just spoken this round, kept through the re-arm cooldown so the
+   *  FIRST utterances back in listening still face the echo guard (speaker
+   *  tails land after playback "ends"). */
+  #spokenTail: string | null = null
+  #spokenTailUntil = 0
   #ttsCache: { id: string; provider: TtsProvider } | null = null
   #session: TtsSession | null = null
   #streamRaw = ''
@@ -325,6 +332,16 @@ export class VoiceController {
       this.#submitUtterance(text)
       return
     }
+    // Just-re-armed listening: the mic may still be capturing the speaker's
+    // own tail (playback "ended" but audio is still in the air). Run the echo
+    // guard against the last readout for a short window.
+    if (Date.now() < this.#spokenTailUntil && this.#spokenTail !== null) {
+      if (looksLikeEcho(text, this.#spokenTail)) {
+        this.#muteAfterEcho()
+        return
+      }
+      this.#spokenTailUntil = 0
+    }
     // Accumulate finalized text; the silence timer flushes it as one prompt.
     this.#pendingFinal = this.#pendingFinal === null ? text : `${this.#pendingFinal}，${text}`
     this.#resetSilenceTimer()
@@ -337,12 +354,20 @@ export class VoiceController {
     this.#pendingFinal = null
     this.status.patch({ interim: '' })
     if (this.#echoMuteTimer !== null) clearTimeout(this.#echoMuteTimer)
-    if (this.#disposed || !this.#speaking) return
-    this.#echoMuteTimer = setTimeout(() => {
-      this.#echoMuteTimer = null
-      if (!this.#speaking) return
-      this.#startRecognition()
-    }, 2_000)
+    if (this.#rearmListeningAfterMute()) {
+      this.#echoMuteTimer = setTimeout(() => {
+        this.#echoMuteTimer = null
+        if (this.#rearmListeningAfterMute()) this.#startRecognition()
+      }, 2_000)
+    }
+  }
+
+  /** Whether the mic should be (re)started where we are in the loop. */
+  #rearmListeningAfterMute(): boolean {
+    if (this.#disposed || this.status.getSnapshot().mode !== 'loop') return false
+    const phase = this.status.getSnapshot().phase
+    return phase === 'listening'
+      || (phase === 'speaking' && resolveSettings(this.#deps.settings()).allowInterrupt)
   }
 
   #resetSilenceTimer(): void {
@@ -421,6 +446,9 @@ export class VoiceController {
   /**
    * Push every complete sentence beyond the fed offset to the session.
    * `final` flushes the partial tail as well (end of generation).
+   * Every pushed piece is also accumulated into #spokenText: the echo guard
+   * needs to know what is being said RIGHT NOW, or barge-in-era feedback
+   * sails through and the loop self-excites.
    */
   #flushStreamSentences(final: boolean): void {
     const settings = resolveSettings(this.#deps.settings())
@@ -432,6 +460,7 @@ export class VoiceController {
     const take = final ? pending.length : cut
     const piece = pending.slice(0, take)
     this.#streamFed += take
+    this.#spokenText = (this.#spokenText ?? '') + piece
     this.#session?.push(piece)
   }
 
@@ -477,6 +506,9 @@ export class VoiceController {
     this.#streamRaw = ''
     this.#streamFed = 0
     this.#session = null
+    this.#spokenText = ''
+    this.#spokenTail = null
+    this.#spokenTailUntil = 0
     const provider = this.#speaker()
     if (!provider.supported()) return
     const speaker = settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName
@@ -525,7 +557,8 @@ export class VoiceController {
 
   #endSpeaking(): void {
     this.#speaking = false
-    this.#spokenText = null
+    // #spokenText deliberately survives: #finishRound turns it into the
+    // re-arm echo guard (speaker tails land after playback "ends").
   }
 
   #finishRound(): void {
@@ -537,10 +570,20 @@ export class VoiceController {
       this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '' })
       return
     }
-    // Cooldown: let the speaker tail decay, then listen again.
+    // Cooldown: let the speaker tail decay, then listen again. The tail of
+    // what was just spoken stays armed as an echo guard for the first
+    // utterances of the next listening phase (tails land after "playback end").
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#pendingFinal = null
+    const spoken = this.#spokenText
+    if (spoken !== null && spoken !== '') {
+      this.#spokenTail = spoken
+      this.#spokenTailUntil = Date.now() + REARM_COOLDOWN_MS + ECHO_TAIL_WINDOW_MS
+    } else {
+      this.#spokenTail = null
+      this.#spokenTailUntil = 0
+    }
     if (this.#rearmTimer !== null) clearTimeout(this.#rearmTimer)
     this.#rearmTimer = setTimeout(() => {
       this.#rearmTimer = null
@@ -588,6 +631,8 @@ export class VoiceController {
     this.#streamFed = 0
     this.#speaking = false
     this.#spokenText = null
+    this.#spokenTail = null
+    this.#spokenTailUntil = 0
     this.#pendingFinal = null
   }
 }
