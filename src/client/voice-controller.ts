@@ -18,7 +18,7 @@ import { looksLikeEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
-import type { VoiceStatus } from './types.ts'
+import type { TranscriptMessage, TranscriptState, VoiceStatus } from './types.ts'
 
 /** Shortest finalized utterance worth submitting (filters breaths and noise). */
 const MIN_UTTERANCE_CHARS = 2
@@ -106,6 +106,29 @@ function pendingCountOf(snapshot: ConversationSnapshot): number {
   return snapshot.pending.length
 }
 
+/** Plain text of one finalized node's blocks (text blocks joined). */
+function nodeText(blocks: readonly { kind: string; text?: string }[]): string {
+  return blocks
+    .filter(block => block.kind === 'text')
+    .map(block => block.text ?? '')
+    .join('')
+}
+
+/** Transcript slice of a snapshot: finalized user/assistant messages + partial. */
+export function transcriptOf(snapshot: ConversationSnapshot): TranscriptState {
+  const messages: TranscriptMessage[] = []
+  for (const node of snapshot.nodes) {
+    if (node.kind === 'user') {
+      messages.push({ seq: node.seq, role: 'user', text: nodeText(node.content as unknown as readonly { kind: string; text?: string }[]) })
+    } else if (node.kind === 'assistant') {
+      messages.push({ seq: node.seq, role: 'assistant', text: nodeText(node.blocks) })
+    }
+  }
+  const partial = snapshot.partial
+  const streaming = partial === null ? '' : partialTextOf(partial)
+  return { messages, streaming, pending: snapshot.pending.length }
+}
+
 /** Theme-private params a session rides (model/endpoint overrides included). */
 function themeParams(settings: Required<VoiceSettings>): Record<string, unknown> {
   return {
@@ -123,6 +146,11 @@ export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
     pendingCount: 0, error: null, autoSpeak: true,
+  })
+
+  /** The session's message stream for the call overlay's right-hand column. */
+  readonly transcript = new SnapshotStore<TranscriptState>({
+    messages: [], streaming: '', pending: 0,
   })
 
   readonly #deps: VoiceControllerDeps
@@ -152,6 +180,9 @@ export class VoiceController {
   constructor(deps: VoiceControllerDeps) {
     this.#deps = deps
     this.status.patch({ autoSpeak: resolveSettings(deps.settings()).autoSpeak })
+    // Transcript mirror (the overlay's right-hand stream) rides the same
+    // snapshot subscription as the pending counter.
+    this.#syncTranscript()
     // Pending interactions (approval cards) surface inside the call overlay:
     // the user must click them, so the overlay has to know while running.
     this.#unsubscribePending = this.#deps.subscribeSnapshot(() => {
@@ -159,7 +190,18 @@ export class VoiceController {
       if (count !== this.status.getSnapshot().pendingCount) {
         this.status.patch({ pendingCount: count })
       }
+      this.#syncTranscript()
     })
+  }
+
+  /** Rebuild the transcript store from the current snapshot (change-gated). */
+  #syncTranscript(): void {
+    const next = transcriptOf(this.#deps.readSnapshot())
+    const prev = this.transcript.getSnapshot()
+    if (prev.streaming === next.streaming && prev.pending === next.pending
+      && prev.messages.length === next.messages.length
+      && prev.messages.every((m, i) => m === next.messages[i])) return
+    this.transcript.set(next)
   }
 
   /** Enter the hands-free loop (the mic button's on arm). */

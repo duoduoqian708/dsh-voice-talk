@@ -97,6 +97,7 @@ export function apply(ctx: ClientContext): void {
       id: `voice-call-${sessionId}`,
       inject: (): VoiceInjected => ({
         hooks: { voice: controller.status },
+        transcript: controller.transcript,
         toggleVoice: () => controller.stopVoice(),
         hangUp: () => controller.stopVoice(),
         stopSpeaking: () => controller.stopSpeaking(),

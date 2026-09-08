@@ -1,10 +1,10 @@
 // Voice-chat styles, injected once per page (no CSS pipeline in this
 // package). Two families:
 //   composer-side  — the mic button + settings card (text mode stays pure)
-//   call overlay   — the "微光" voice layer: aurora ambience, live wave
-//                    bars, frameless captions, glass controls. The dim is
-//                    deliberately light so the underlying workspace execution
-//                    stays visible.
+//   call overlay   — an opaque two-column call stage: glass call panel with
+//                    avatar + ripple rings on the left, the session's message
+//                    stream on the right. Static background, transform-only
+//                    motion; backdrop-filter confined to small static panels.
 
 const CSS = `
 /* ---- mic button (composer tool row) ---- */
@@ -59,265 +59,141 @@ const CSS = `
   background: color-mix(in srgb, currentColor 10%, transparent); color: inherit;
 }
 
-/* ---- call overlay: aurora ambience ---- */
+/* ---- call overlay: opaque deep-sea stage, two columns ----
+   Performance contract: the page background is a STATIC opaque gradient
+   (no filter, no animation). backdrop-filter appears only on small panels
+   whose backdrop never changes; per-frame motion (ripples, typing caret)
+   is transform/opacity only. */
 .dsh-voice-call {
   position: fixed; inset: 0; z-index: 9999;
-  pointer-events: none;
-  animation: dsh-veil-in .5s ease both;
+  display: grid; grid-template-columns: 400px 1fr;
+  background:
+    radial-gradient(ellipse 120% 90% at 18% 0%, #14243F 0%, transparent 55%),
+    radial-gradient(ellipse 110% 85% at 88% 100%, #0D2B33 0%, transparent 58%),
+    linear-gradient(160deg, #0B1220 0%, #0A0F1B 100%);
+  color: #E6EDF7;
+  animation: dsh-veil-in .4s ease both;
+  overflow: hidden;
 }
 @keyframes dsh-veil-in { from { opacity: 0; } to { opacity: 1; } }
 
-.dsh-voice-call::before {
-  content: ''; position: absolute; inset: 0;
-  background: radial-gradient(ellipse 92% 74% at 50% 46%, rgba(5, 9, 18, .82) 0%, rgba(5, 9, 18, .68) 52%, rgba(6, 11, 20, .58) 100%);
-}
-
-.dsh-voice-aurora { position: absolute; inset: 0; filter: blur(72px); opacity: .55; transition: opacity 1.2s ease; }
-.dsh-voice-aurora i { position: absolute; border-radius: 50%; display: block; }
-.dsh-voice-aur1 {
-  width: 62vw; height: 62vw; left: -14vw; top: -20vh;
-  background: radial-gradient(circle, rgba(30,58,138,.5), transparent 65%);
-  animation: dsh-drift1 26s ease-in-out infinite alternate;
-}
-.dsh-voice-aur2 {
-  width: 56vw; height: 56vw; right: -14vw; bottom: -22vh;
-  background: radial-gradient(circle, rgba(19,110,110,.38), transparent 65%);
-  animation: dsh-drift2 32s ease-in-out infinite alternate;
-}
-.dsh-voice-aur3 {
-  width: 44vw; height: 44vw; left: 32vw; top: 28vh;
-  background: radial-gradient(circle, rgba(88,45,144,.3), transparent 65%);
-  animation: dsh-drift3 38s ease-in-out infinite alternate;
-}
-@keyframes dsh-drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(9vw,7vh) scale(1.18); } }
-@keyframes dsh-drift2 { from { transform: translate(0,0) scale(1.1); } to { transform: translate(-8vw,-9vh) scale(.9); } }
-@keyframes dsh-drift3 { from { transform: translate(0,0) scale(.95); } to { transform: translate(-6vw,9vh) scale(1.15); } }
-.dsh-voice-call[data-phase="thinking"] .dsh-voice-aurora { opacity: .32; }
-.dsh-voice-call[data-phase="speaking"] .dsh-voice-aurora { opacity: .72; }
-
-.dsh-voice-grain {
-  position: absolute; inset: 0; opacity: .7;
-  background-image:
-    repeating-linear-gradient(0deg, rgba(255,255,255,.008) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(90deg, rgba(255,255,255,.006) 0 1px, transparent 1px 4px);
-}
-
-/* ---- stage ---- */
-.dsh-voice-stage {
-  position: absolute; inset: 0;
+/* ---- left: the call face ---- */
+.dsh-voice-left {
   display: flex; flex-direction: column; align-items: center;
-  padding: 34px 24px 44px;
-  animation: dsh-stage-in .7s cubic-bezier(.22,1,.36,1) both;
-}
-@keyframes dsh-stage-in {
-  from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; }
+  padding: 40px 28px 30px;
+  margin: 14px; border-radius: 24px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .09);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .35);
 }
 
 .dsh-voice-topline {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px; letter-spacing: .2em; color: rgba(230,237,247,.38);
+  font-size: 12px; letter-spacing: .2em; color: rgba(230,237,247,.4);
   font-variant-numeric: tabular-nums;
 }
 
-.dsh-voice-center {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px;
+.dsh-voice-avatar-wrap {
+  position: relative; width: 168px; height: 168px; margin: 34px 0 26px;
+  display: grid; place-items: center; flex: none;
 }
-
-.dsh-voice-wave { display: flex; align-items: center; justify-content: center; gap: 7px; height: 120px; }
-.dsh-voice-wave-bar {
-  width: 5px; border-radius: 3px; height: 12px;
-  background: linear-gradient(180deg, #8FD8FF, #4A7BD4);
-  box-shadow: 0 0 12px rgba(106, 184, 255, .25);
+.dsh-voice-avatar {
+  width: 92px; height: 92px; border-radius: 50%;
+  box-shadow: 0 6px 30px rgba(77, 163, 255, .35), 0 0 0 1px rgba(255,255,255,.12) inset;
 }
+.dsh-voice-ripples { position: absolute; inset: 0; pointer-events: none; }
+.dsh-voice-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1.5px solid rgba(106, 184, 255, .8);
+  will-change: transform, opacity;
+}
+.dsh-voice-call[data-phase="thinking"] .dsh-voice-ring { border-color: rgba(148, 163, 184, .55); }
+.dsh-voice-call[data-phase="speaking"] .dsh-voice-ring { border-color: rgba(94, 234, 212, .8); }
 
 .dsh-voice-state-word {
-  font-size: 21px; font-weight: 250; letter-spacing: .42em; text-indent: .42em;
-  color: rgba(230,237,247,.92); text-shadow: 0 2px 24px rgba(0,0,0,.6);
+  font-size: 19px; font-weight: 300; letter-spacing: .4em; text-indent: .4em;
+  color: rgba(230,237,247,.92);
 }
 
-/* ---- captions: frameless floating text ---- */
-.dsh-voice-captions {
-  min-height: 100px; max-height: 30vh; overflow-y: auto; pointer-events: auto;
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-  max-width: 580px; text-align: center; padding: 0 16px;
-  scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent;
+.dsh-voice-live {
+  min-height: 84px; margin-top: 22px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  text-align: center; padding: 0 6px;
 }
-.dsh-voice-cap {
-  font-size: 15px; line-height: 1.85;
-  display: flex; align-items: baseline; gap: 10px;
-  animation: dsh-cap-in .5s ease both;
-  text-shadow: 0 1px 14px rgba(0,0,0,.55);
-}
-@keyframes dsh-cap-in {
-  from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; }
-}
-.dsh-voice-cap-dot {
-  width: 5px; height: 5px; border-radius: 50%; flex: none; position: relative; top: -3px;
-}
-.dsh-voice-cap-user { color: rgba(230,237,247,.88); }
-.dsh-voice-cap-user .dsh-voice-cap-dot { background: #8FB6FF; box-shadow: 0 0 8px rgba(143,182,255,.8); }
-.dsh-voice-cap-ai { color: rgba(196,240,226,.92); }
-.dsh-voice-cap-ai .dsh-voice-cap-dot { background: #5EEAD4; box-shadow: 0 0 8px rgba(94,234,212,.8); }
-.dsh-voice-cap-live { color: rgba(143,182,255,.9); font-style: normal; }
-.dsh-voice-cap-live .dsh-voice-cap-dot { background: #8FB6FF; animation: dsh-voice-pulse 1.2s ease-in-out infinite; }
-.dsh-voice-cap-pending { color: #F5C56B; font-size: 13px; }
-.dsh-voice-cap-pending .dsh-voice-cap-dot { background: #F5B84B; box-shadow: 0 0 8px rgba(245,184,75,.8); }
-.dsh-voice-cap-error { color: #FFA9A2; font-size: 13px; }
-.dsh-voice-cap-error .dsh-voice-cap-dot { background: #FF6B61; }
+.dsh-voice-live > div { max-height: 52px; overflow-y: auto; width: 100%; scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent; }
+.dsh-voice-live-interim { color: #8FB6FF; font-size: 14px; line-height: 1.7; }
+.dsh-voice-live-hint { color: rgba(230,237,247,.4); font-size: 13px; letter-spacing: .05em; }
+.dsh-voice-live-warn { color: #F5C56B; font-size: 12.5px; line-height: 1.6; }
+.dsh-voice-live-error { color: #FFA9A2; font-size: 12.5px; line-height: 1.6; }
 
-/* ---- controls: glass hang-up, quiet text buttons ---- */
+/* ---- left: controls (glass pill) ---- */
 .dsh-voice-controls {
-  display: flex; align-items: center; gap: 16px; height: 60px; margin-top: 24px;
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 14px; padding: 14px 18px; border-radius: 18px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .08);
 }
-.dsh-voice-controls button { pointer-events: auto; }
+/* THE fix: the old sheet only re-enabled buttons — the speaker <select> and
+   the rate <input type=range> were born unreachable. Enable every control. */
+.dsh-voice-controls button,
+.dsh-voice-controls select,
+.dsh-voice-controls input,
+.dsh-voice-controls .dsh-voice-ctl { pointer-events: auto; }
+
 .dsh-voice-hangup {
-  width: 56px; height: 56px; border-radius: 50%; cursor: pointer;
-  background: rgba(255,255,255,.05);
+  width: 54px; height: 54px; border-radius: 50%; cursor: pointer;
+  background: rgba(255,255,255,.06);
   border: 1px solid rgba(255,255,255,.14);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   color: #FF6B61;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: all .2s;
+  transition: border-color .2s, background .2s, transform .1s;
 }
 .dsh-voice-hangup:hover {
-  border-color: rgba(255,107,97,.55); background: rgba(255,107,97,.08);
-  box-shadow: 0 0 28px rgba(255,107,97,.18);
+  border-color: rgba(255,107,97,.55); background: rgba(255,107,97,.1);
+  box-shadow: 0 0 24px rgba(255,107,97,.2);
 }
 .dsh-voice-hangup:active { transform: scale(.94); }
 .dsh-voice-skip, .dsh-voice-speak-toggle {
-  border: none; background: none; cursor: pointer; color: rgba(230,237,247,.42);
-  font-size: 13px; letter-spacing: .06em; transition: color .3s, opacity .3s;
+  border: none; background: none; cursor: pointer; color: rgba(230,237,247,.5);
+  font-size: 13px; letter-spacing: .05em; transition: color .2s;
 }
-.dsh-voice-skip:hover, .dsh-voice-speak-toggle:hover { color: rgba(230,237,247,.85); }
-.dsh-voice-skip.hidden { opacity: 0; pointer-events: none; }
+.dsh-voice-skip:hover, .dsh-voice-speak-toggle:hover { color: rgba(230,237,247,.9); }
+.dsh-voice-skip.hidden { display: none; }
 
-/* theme setup guide (settings card) */
-.dsh-voice-setup { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); }
-.dsh-voice-setup-note { margin: 0; font-size: 12px; opacity: .75; }
-.dsh-voice-setup-link { color: #4A7BD4; }
-.dsh-voice-setup-ok { font-size: 11px; color: #2fae8f; margin-left: 6px; }
-.dsh-voice-setup-actions { display: flex; align-items: center; gap: 10px; }
-
-/* provider cards (settings card) */
-.dsh-voice-providers { display: grid; gap: 10px; }
-.dsh-voice-group {
-  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid rgba(15, 17, 21, .1);
-  background: rgba(15, 17, 21, .02);
-}
-.dsh-voice-group-title { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: rgba(15, 17, 21, .55); }
-.dsh-voice-provider {
-  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid rgba(15, 17, 21, .1);
-  background: rgba(15, 17, 21, .02);
-}
-.dsh-voice-provider.is-active {
-  border-color: rgba(15, 17, 21, .5);
-  background: rgba(15, 17, 21, .03);
-}
-.dsh-voice-provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.dsh-voice-provider-name { font-size: 13px; font-weight: 600; }
-.dsh-voice-provider-status { font-size: 11px; opacity: .6; }
-.dsh-voice-provider-status.is-missing { color: #B4720F; opacity: 1; }
-.dsh-voice-provider-note { margin: 0; font-size: 11px; opacity: .55; line-height: 1.6; }
-.dsh-voice-provider-actions { display: flex; align-items: center; gap: 8px; }
-.dsh-voice-provider-btn {
-  border: none; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer;
-  background: rgba(15, 17, 21, .06); color: #0F1115;
-}
-.dsh-voice-provider-btn:hover { background: rgba(15, 17, 21, .1); }
-.dsh-voice-provider-btn:disabled { opacity: .4; cursor: default; }
-.dsh-voice-provider-btn.is-primary { background: #0F1115; color: #fff; }
-.dsh-voice-provider-btn.is-primary:hover { background: #2A2E35; }
-
-/* provider settings modal — mirrors the platform settings dialog (light panel,
-   24px radius, hairline shadow); colors are hard-coded because the host page
-   ships no theme variables. */
-.dsh-voice-modal-veil {
-  position: fixed; inset: 0; z-index: 10000;
-  background: rgba(15, 17, 21, .4);
-  display: flex; align-items: center; justify-content: center;
-  animation: dsh-veil-in .2s ease both;
-}
-.dsh-voice-modal {
-  width: min(520px, calc(100vw - 48px)); max-height: 82vh; overflow-y: auto;
-  display: grid; gap: 12px; padding: 24px; border-radius: 24px;
-  background: #fff; color: #0F1115;
-  box-shadow:
-    rgba(0, 0, 0, .2) 0 0 1px 0,
-    rgba(0, 0, 0, .06) 0 8px 24px 0,
-    rgba(0, 0, 0, .04) 0 2px 8px 0;
-  animation: dsh-modal-in .22s cubic-bezier(.22, 1, .36, 1) both;
-}
-@keyframes dsh-modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
-.dsh-voice-modal-head { display: flex; align-items: center; justify-content: space-between; }
-.dsh-voice-modal-title { margin: 0; font-size: 16px; font-weight: 600; }
-.dsh-voice-modal-close {
-  width: 28px; height: 28px; border: none; border-radius: 8px; cursor: pointer;
-  background: transparent; color: inherit; font-size: 15px; line-height: 1; opacity: .55;
-}
-.dsh-voice-modal-close:hover { background: rgba(15, 17, 21, .06); opacity: 1; }
-.dsh-voice-modal-hint { font-size: 11px; opacity: .55; }
-.dsh-voice-modal-divider {
-  display: flex; align-items: center; gap: 10px; margin-top: 2px;
-  font-size: 12px; font-weight: 600; letter-spacing: .08em; color: rgba(15, 17, 21, .55);
-}
-.dsh-voice-modal-divider::after {
-  content: ''; flex: 1; height: 1px; background: rgba(15, 17, 21, .1);
-}
-.dsh-voice-modal-footer { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
-.dsh-voice-input-wide { flex: 1; max-width: none; min-width: 0; }
-.dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
-.dsh-voice-modal select.dsh-voice-input { max-width: none; flex: 1; }
-.dsh-voice-cred-cell { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dsh-voice-cred-badge {
-  flex: none; font-size: 11px; color: #2fae8f;
-  padding: 2px 8px; border-radius: 999px;
-  background: rgba(47, 174, 143, .12);
-}
-
-/* speaker picker + rate control (call overlay control row) */
+/* speaker picker + rate control */
 .dsh-voice-ctl {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; letter-spacing: .04em; color: rgba(230,237,247,.42);
-  cursor: pointer; transition: color .3s;
-  position: relative;
+  font-size: 13px; color: rgba(230,237,247,.55);
+  cursor: pointer; transition: color .2s;
+  position: relative; max-width: 130px;
 }
-.dsh-voice-ctl:hover, .dsh-voice-ctl:focus-within { color: rgba(230,237,247,.85); }
+.dsh-voice-ctl:hover, .dsh-voice-ctl:focus-within { color: rgba(230,237,247,.9); }
 .dsh-voice-ctl-select {
   appearance: none; -webkit-appearance: none;
   position: absolute; inset: 0; width: 100%; height: 100%;
   opacity: 0; cursor: pointer; border: none; background: none; color: inherit;
   font-size: 13px;
 }
-.dsh-voice-ctl-value { pointer-events: none; }
-.dsh-voice-ctl-button {
-  border: none; background: none; padding: 0;
-}
+.dsh-voice-ctl-value { pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsh-voice-rate { display: inline-flex; align-items: center; gap: 8px; }
-.dsh-voice-rate-slider {
-  width: 110px; accent-color: #6AB8FF; cursor: pointer; height: auto; opacity: .9;
-}
 .dsh-voice-rate-value {
   font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
   font-variant-numeric: tabular-nums; min-width: 34px;
 }
-/* magnet rate slider (call HUD only): five discrete stops with tick dots */
 .dsh-voice-rate-magnet { display: inline-flex; flex-direction: column; gap: 2px; }
 .dsh-voice-rate-magnet input[type='range'] {
-  width: 180px; margin: 0; accent-color: #0F1115; cursor: pointer; height: 18px;
+  width: 130px; margin: 0; accent-color: #6AB8FF; cursor: pointer; height: 18px;
 }
 .dsh-voice-rate-ticks {
-  display: flex; justify-content: space-between; padding: 0 8px; margin: 0 auto; width: 180px;
+  display: flex; justify-content: space-between; padding: 0 8px; margin: 0 auto; width: 130px;
 }
 .dsh-voice-rate-ticks i {
-  width: 4px; height: 4px; border-radius: 50%; background: rgba(15, 17, 21, .22);
+  width: 3px; height: 3px; border-radius: 50%; background: rgba(230, 237, 247, .3);
 }
-.dsh-voice-rate-ticks i.is-active { background: #0F1115; }
-.dsh-voice-call .dsh-voice-rate-magnet input[type='range'] { accent-color: #6AB8FF; }
-.dsh-voice-call .dsh-voice-rate-ticks i { background: rgba(230, 237, 247, .35); }
-.dsh-voice-call .dsh-voice-rate-ticks i.is-active { background: #8FD8FF; }
+.dsh-voice-rate-ticks i.is-active { background: #8FD8FF; }
 .dsh-voice-st-dot {
   display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 7px;
   position: relative; top: -2px; background: #5EEAD4; box-shadow: 0 0 8px rgba(94,234,212,.8);
@@ -326,11 +202,70 @@ const CSS = `
   background: rgba(148,163,184,.5); box-shadow: none;
 }
 
+/* ---- right: the session stream ---- */
+.dsh-voice-right { min-width: 0; display: flex; }
+.dsh-voice-stream {
+  flex: 1; overflow-y: auto; padding: 26px 30px 34px;
+  display: flex; flex-direction: column; gap: 18px;
+  scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent;
+}
+.dsh-voice-msg { display: flex; gap: 10px; align-items: flex-start; }
+.dsh-voice-msg-user { justify-content: flex-end; }
+.dsh-voice-msg-user .dsh-voice-bubble {
+  max-width: 72%;
+  background: rgba(106, 184, 255, .14);
+  border: 1px solid rgba(106, 184, 255, .2);
+  color: #DCEBFF;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px; font-size: 14px; line-height: 1.75;
+  white-space: pre-wrap; word-break: break-word;
+}
+.dsh-voice-msg-ai { max-width: 86%; }
+.dsh-voice-msg-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex: none; margin-top: 2px;
+  opacity: .92;
+}
+.dsh-voice-msg-body {
+  min-width: 0;
+  background: rgba(255, 255, 255, .045);
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 4px 16px 16px 16px;
+  padding: 10px 14px;
+}
+.dsh-voice-prose {
+  margin: 0; font-size: 14px; line-height: 1.85;
+  white-space: pre-wrap; word-break: break-word; color: rgba(230,237,247,.92);
+}
+.dsh-voice-prose + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-code, .dsh-voice-code + .dsh-voice-prose { margin-top: 8px; }
+.dsh-voice-code {
+  margin: 0; padding: 10px 12px; border-radius: 10px; overflow-x: auto;
+  background: rgba(3, 8, 18, .65); border: 1px solid rgba(255,255,255,.06);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.7;
+  color: #B9D4FF; white-space: pre;
+}
+.dsh-voice-msg-empty { opacity: .4; }
+.dsh-voice-caret {
+  display: inline-block; width: 2px; height: 1em; margin-left: 2px;
+  background: #6AB8FF; vertical-align: text-bottom;
+  animation: dsh-caret-blink 1s steps(1) infinite;
+}
+@keyframes dsh-caret-blink { 50% { opacity: 0; } }
+
+@media (max-width: 860px) {
+  .dsh-voice-call { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .dsh-voice-left { margin: 10px; padding: 22px 18px 20px; }
+  .dsh-voice-avatar-wrap { width: 128px; height: 128px; margin: 18px 0 14px; }
+  .dsh-voice-avatar { width: 68px; height: 68px; }
+  .dsh-voice-live { min-height: 64px; margin-top: 12px; }
+  .dsh-voice-stream { padding: 16px 14px 24px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .dsh-voice-call, .dsh-voice-stage, .dsh-voice-cap { animation: none !important; }
-  .dsh-voice-aurora i, .dsh-voice-mic.is-listening svg, .dsh-voice-cap-live .dsh-voice-cap-dot {
+  .dsh-voice-call { animation: none !important; }
+  .dsh-voice-mic.is-listening svg, .dsh-voice-caret {
     animation: none !important;
   }
+  .dsh-voice-ring { opacity: .18 !important; transform: none !important; }
 }
 `
 

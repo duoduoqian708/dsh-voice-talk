@@ -37,6 +37,7 @@ await build({
   jsx: 'automatic',
   sourcemap: false,
   external: ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/cordis'],
+  loader: { '.png': 'dataurl', '.webp': 'dataurl' },
   banner: {
     js: [
       `window.__ModuleLoader__.load({ id: ${JSON.stringify(pkg.name)}, factory: (require) => {`,

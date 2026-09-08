@@ -23,3 +23,21 @@ export interface VoiceStatus {
   /** Auto-readout switch (mirrors the settings namespace, locally overridable). */
   readonly autoSpeak: boolean
 }
+
+/** One transcript message in the call overlay's right-hand stream. */
+export interface TranscriptMessage {
+  /** Conversation-node seq (stable React key). */
+  readonly seq: number
+  readonly role: 'user' | 'assistant'
+  /** Plain text content (text blocks joined; markdown kept as-is). */
+  readonly text: string
+}
+
+/** Published transcript state: the session's message stream for the overlay. */
+export interface TranscriptState {
+  readonly messages: readonly TranscriptMessage[]
+  /** Streaming partial's prose (live typing bubble); '' when idle. */
+  readonly streaming: string
+  /** Pending interaction cards (approvals/questions) on the session. */
+  readonly pending: number
+}

@@ -3,7 +3,8 @@
 // overlay; the text mode stays pure text.
 
 import type { ReactElement } from 'react'
-import type { VoiceStatus } from './types.ts'
+import type { TranscriptState, VoiceStatus } from './types.ts'
+import type { ObservableSource } from './store.ts'
 
 /**
  * Selector-hook shape the renderer binds for each inject `hooks` member
@@ -21,6 +22,8 @@ export interface VoiceInjected {
   hooks: {
     voice: { getSnapshot(): VoiceStatus; subscribe(listener: () => void): () => void }
   }
+  /** The session transcript source (bound to `useTranscript`); absent on mic button. */
+  transcript?: ObservableSource<TranscriptState>
   /** Enter or leave the voice loop (pure on/off; same as the mic button). */
   toggleVoice(): void
   /** Leave the voice loop (explicit off; the overlay hang-up uses it). */
@@ -43,6 +46,8 @@ export interface VoiceInjected {
 export interface VoiceSurfaceProps {
   /** Selector hook over the shared voice status (framework-bound). */
   useVoice: VoiceSelectorHook
+  /** The session transcript source (overlay binds its own hook). */
+  transcript?: ObservableSource<TranscriptState>
   /** Enter or leave the voice loop (pure on/off). */
   toggleVoice(): void
   /** Leave the voice loop (explicit off). */

@@ -1,19 +1,22 @@
-// The call overlay: the whole voice interaction lives here. The page beneath
-// stays visible through a light radial dim (you can watch the agent work) and
-// fully interactive — the veil passes pointer events except to HUD controls.
+// The call overlay: the whole voice interaction lives here. An opaque
+// deep-sea stage split in two: the LEFT panel is the call face (DeepSeek
+// avatar with live mic-driven ripples, phase word, live transcript line,
+// controls); the RIGHT column is the session's message stream rendered from
+// the same conversation snapshot the host page reads.
 //
-// Visual language (finalized "微光" direction): an aurora ambience layer, a
-// row of live mic-driven wave bars, frameless floating captions, a glass
-// hang-up key. No panels, no state lamps.
+// Per-frame motion is transform/opacity only; backdrop-filter sits on small,
+// static-backdrop surfaces only, so the glass never costs a repaint storm.
 
 import { createPortal } from 'react-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import type { VoiceStatus } from './types.ts'
-import { VoiceWave } from './voice-wave.ts'
+import type { TranscriptState, VoiceStatus } from './types.ts'
+import type { ObservableSource } from './store.ts'
+import { VoiceRipple } from './voice-wave.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
 import { RateMagnetSlider } from './rate-magnet.tsx'
 import { nearestRateLabel } from './voice-settings.ts'
+import avatarUrl from './assets/avatar.png'
 
 /** Selector-hook shape over the shared voice status. */
 export type VoiceSelectorHook = <S>(selector: (snapshot: VoiceStatus) => S, eq?: (a: S, b: S) => boolean) => S
@@ -21,6 +24,8 @@ export type VoiceSelectorHook = <S>(selector: (snapshot: VoiceStatus) => S, eq?:
 /** Props of the call overlay (the injected face, hooks bound). */
 export interface CallOverlayProps {
   useVoice: VoiceSelectorHook
+  /** The session transcript source (same snapshot the host stream reads). */
+  transcript?: ObservableSource<TranscriptState>
   /** Hang up = leave the voice loop (same as Esc). */
   hangUp(): void
   /** Skip the current readout. */
@@ -44,46 +49,109 @@ const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
   speaking: '播报中',
 }
 
-interface CaptionEntry {
-  kind: 'user' | 'ai'
-  text: string
+/** No-op store fallbacks for overlays mounted without a transcript source. */
+const subscribeNoop = (): (() => void) => () => { }
+const snapshotNoop = (): TranscriptState => ({ messages: [], streaming: '', pending: 0 })
+
+/** Extract the fenced-code parts of a message for the stream's code styling. */
+function splitCode(text: string): { kind: 'text' | 'code'; body: string }[] {
+  const parts: { kind: 'text' | 'code'; body: string }[] = []
+  const re = /```(\w*)\n?([\s\S]*?)(?:```|$)/g
+  let last = 0
+  for (const m of text.matchAll(re)) {
+    if (m.index! > last) parts.push({ kind: 'text', body: text.slice(last, m.index) })
+    parts.push({ kind: 'code', body: m[2] ?? '' })
+    last = m.index! + m[0].length
+  }
+  if (last < text.length) parts.push({ kind: 'text', body: text.slice(last) })
+  return parts.filter(p => p.body !== '')
 }
 
-/** One frameless floating caption line. */
-function Caption({ entry }: { entry: CaptionEntry }): ReactElement {
+/** The DeepSeek avatar with the live ripple rings around it. */
+function Avatar({ useVoice }: { useVoice: VoiceSelectorHook }): ReactElement {
+  const phase = useVoice(s => s.phase)
+  const rippleRef = useRef<HTMLDivElement | null>(null)
+  const rippleRef2 = useRef<VoiceRipple | null>(null)
+
+  useEffect(() => {
+    const container = rippleRef.current
+    if (container === null) return
+    const ripple = new VoiceRipple(container)
+    rippleRef2.current = ripple
+    ripple.setPhase(phase)
+    if (phase === 'listening') void ripple.attachMic()
+    ripple.start()
+    return () => {
+      ripple.dispose()
+      rippleRef2.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    const ripple = rippleRef2.current
+    if (ripple == null) return
+    ripple.setPhase(phase)
+    if (phase === 'listening') void ripple.attachMic()
+  }, [phase])
+
   return (
-    <div className={`dsh-voice-cap dsh-voice-cap-${entry.kind}`}>
-      <span className='dsh-voice-cap-dot' aria-hidden='true' />
-      <span>{entry.text}</span>
+    <div className='dsh-voice-avatar-wrap' data-phase={phase}>
+      <div className='dsh-voice-ripples' ref={rippleRef} aria-hidden='true' />
+      <img className='dsh-voice-avatar' src={avatarUrl} alt='DeepSeek' draggable={false} />
+    </div>
+  )
+}
+
+/** One stream message: user bubble right, assistant prose left. */
+function StreamMessage({ role, text }: { role: 'user' | 'assistant'; text: string }): ReactElement {
+  if (role === 'user') {
+    return (
+      <div className='dsh-voice-msg dsh-voice-msg-user'>
+        <div className='dsh-voice-bubble'>{text}</div>
+      </div>
+    )
+  }
+  const parts = splitCode(text)
+  return (
+    <div className='dsh-voice-msg dsh-voice-msg-ai'>
+      <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
+      <div className='dsh-voice-msg-body'>
+        {parts.length === 0
+          ? <span className='dsh-voice-msg-empty'>…</span>
+          : parts.map((part, i) => part.kind === 'code'
+            ? <pre key={i} className='dsh-voice-code'><code>{part.body}</code></pre>
+            : <p key={i} className='dsh-voice-prose'>{part.body}</p>)}
+      </div>
     </div>
   )
 }
 
 /**
- * The full-screen voice layer, rendered only while the loop is armed.
- * The dim never captures events; only the controls do.
+ * The full-screen call stage, rendered only while the loop is armed.
  */
-export function CallOverlay({ useVoice, hangUp, stopSpeaking, setAutoSpeak, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
+export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setAutoSpeak, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
   const mode = useVoice(s => s.mode)
   const active = mode === 'loop'
   const phase = useVoice(s => s.phase)
   const interim = useVoice(s => s.interim)
-  const caption = useVoice(s => s.caption)
-  const lastPrompt = useVoice(s => s.lastPrompt)
   const pendingCount = useVoice(s => s.pendingCount)
   const error = useVoice(s => s.error)
   const autoSpeak = useVoice(s => s.autoSpeak)
 
-  const waveRef = useRef<HTMLDivElement | null>(null)
-  const waveRef2 = useRef<VoiceWave | null>(null)
-  const [history, setHistory] = useState<CaptionEntry[]>([])
-  const lastPromptSeen = useRef('')
-  const lastCaptionSeen = useRef('')
   const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(Date.now())
 
   const [setupMissing, setSetupMissing] = useState(false)
   const themeId = settings().ttsTheme
+
+  // Transcript subscription: the store is change-gated, so the snapshot
+  // reference only moves when content actually changed.
+  const streamState = useSyncExternalStore(
+    transcript?.subscribe ?? subscribeNoop,
+    transcript?.getSnapshot ?? snapshotNoop,
+  )
+  const messages = streamState.messages
+  const streaming = streamState.streaming
 
   // Theme setup check: a cloud theme that still needs credentials surfaces a
   // caption instead of a confusing synth error mid-round.
@@ -101,56 +169,28 @@ export function CallOverlay({ useVoice, hangUp, stopSpeaking, setAutoSpeak, setR
     return () => { alive = false }
   }, [active, themeId])
 
-  // Caption history: finalized prompts and readouts scroll here; the live
-  // interim rides above them while listening.
-  useEffect(() => {
-    if (lastPrompt !== '' && lastPrompt !== lastPromptSeen.current) {
-      lastPromptSeen.current = lastPrompt
-      setHistory(h => [...h.slice(-5), { kind: 'user', text: lastPrompt }])
-    }
-  }, [lastPrompt])
-  useEffect(() => {
-    if (caption !== '' && caption !== lastCaptionSeen.current) {
-      lastCaptionSeen.current = caption
-      setHistory(h => [...h.slice(-5), { kind: 'ai', text: caption }])
-    }
-  }, [caption])
-
-  // The wave engine mounts WITH the overlay DOM (the component itself mounts
-  // at plugin load while the layer renders only when the loop arms): key the
-  // engine's lifecycle on `active`, then ride phase changes after that.
-  useEffect(() => {
-    if (mode !== 'loop') return
-    const container = waveRef.current
-    if (container === null) return
-    const wave = new VoiceWave(container)
-    waveRef2.current = wave
-    wave.setPhase(phase)
-    if (phase === 'listening') void wave.attachMic()
-    wave.start()
-    return () => {
-      wave.dispose()
-      waveRef2.current = null
-    }
-    // phase intentionally omitted on mount: the phase effect below follows it
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode])
-  useEffect(() => {
-    const wave = waveRef2.current
-    if (wave == null) return
-    wave.setPhase(phase)
-    if (phase === 'listening') void wave.attachMic()
-  }, [phase])
-
   // Call timer, mm:ss — restarted with each armed loop.
   useEffect(() => {
     if (mode !== 'loop') return
     startedAt.current = Date.now()
     setElapsed(0)
-    setHistory([])
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 500)
     return () => clearInterval(id)
   }, [mode])
+
+  // Stream auto-scroll: follow the tail unless the user scrolled up.
+  const streamRef = useRef<HTMLDivElement | null>(null)
+  const followRef = useRef(true)
+  useEffect(() => {
+    const el = streamRef.current
+    if (el === null || !followRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, streaming])
+  const onStreamScroll = (): void => {
+    const el = streamRef.current
+    if (el === null) return
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+  }
 
   if (mode !== 'loop') return null
 
@@ -159,47 +199,19 @@ export function CallOverlay({ useVoice, hangUp, stopSpeaking, setAutoSpeak, setR
 
   return createPortal(
     <div className='dsh-voice-call' data-phase={phase}>
-      <div className='dsh-voice-aurora' aria-hidden='true'>
-        <i className='dsh-voice-aur1' /><i className='dsh-voice-aur2' /><i className='dsh-voice-aur3' />
-      </div>
-      <div className='dsh-voice-grain' aria-hidden='true' />
-
-      <div className='dsh-voice-stage'>
+      <aside className='dsh-voice-left'>
         <div className='dsh-voice-topline'>{mm}:{ss}</div>
+        <Avatar useVoice={useVoice} />
+        <div className='dsh-voice-state-word'>{PHASE_WORD[phase]}</div>
 
-        <div className='dsh-voice-center'>
-          <div className='dsh-voice-wave' ref={waveRef} aria-hidden='true' />
-          <div className='dsh-voice-state-word'>{PHASE_WORD[phase]}</div>
-        </div>
-
-        <div className='dsh-voice-captions' aria-live='polite'>
-          {pendingCount > 0 && (
-            <div className='dsh-voice-cap dsh-voice-cap-pending'>
-              <span className='dsh-voice-cap-dot' aria-hidden='true' />
-              <span>{pendingCount} 项待确认 — 点击下方穿透区域处理底层页面的卡片</span>
-            </div>
+        <div className='dsh-voice-live' aria-live='polite'>
+          {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
+          {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
+          {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 点击底层页面卡片处理</div>}
+          {phase === 'listening' && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
+          {phase !== 'listening' && (error === null && !setupMissing && pendingCount === 0) && (
+            <div className='dsh-voice-live-hint'>{phase === 'thinking' ? '正在组织回复…' : phase === 'speaking' ? '正在播报，可随时打断' : '说话即发送'}</div>
           )}
-          {error !== null && (
-            <div className='dsh-voice-cap dsh-voice-cap-error'>
-              <span className='dsh-voice-cap-dot' aria-hidden='true' />
-              <span>{error}</span>
-            </div>
-          )}
-          {setupMissing && (
-            <div className='dsh-voice-cap dsh-voice-cap-pending'>
-              <span className='dsh-voice-cap-dot' aria-hidden='true' />
-              <span>该音色主题尚未配置凭证 — 到 设置 → 插件 → 语音对话 完成接入，或切回系统语音</span>
-            </div>
-          )}
-          {phase === 'listening' && interim !== '' && (
-            <div className='dsh-voice-cap dsh-voice-cap-live'>
-              <span className='dsh-voice-cap-dot' aria-hidden='true' />
-              <span>{interim}</span>
-            </div>
-          )}
-          {history.map((entry, i) => (
-            <Caption key={`${entry.kind}-${i}`} entry={entry} />
-          ))}
         </div>
 
         <div className='dsh-voice-controls'>
@@ -232,7 +244,21 @@ export function CallOverlay({ useVoice, hangUp, stopSpeaking, setAutoSpeak, setR
             跳过播报
           </button>
         </div>
-      </div>
+      </aside>
+
+      <section className='dsh-voice-right' aria-label='会话内容'>
+        <div className='dsh-voice-stream' ref={streamRef} onScroll={onStreamScroll}>
+          {messages.map(m => <StreamMessage key={m.seq} role={m.role} text={m.text} />)}
+          {streaming !== '' && phase === 'thinking' && (
+            <div className='dsh-voice-msg dsh-voice-msg-ai'>
+              <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
+              <div className='dsh-voice-msg-body'>
+                <p className='dsh-voice-prose dsh-voice-typing'>{streaming}<span className='dsh-voice-caret' aria-hidden='true' /></p>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
     </div>,
     document.body,
   )
