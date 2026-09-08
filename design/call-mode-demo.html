@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<!-- dsh-voice-talk 通话层静态预览（design/ 视觉稿目录）。
+     类名与 CSS 从 src/client/styles.ts、结构从 call-overlay.tsx 手工对齐；
+     两侧改动需手动同步本文件。仅供预览，不参与构建。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dsh-voice-talk · 通话层预览</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif; }
+
+  /* ===== 以下与 src/client/styles.ts 的 overlay 段 1:1（仅 .dsh-voice-call 的定位改为 demo 布局） ===== */
+  .dsh-voice-call {
+    position: relative; height: 100vh;
+    display: grid; grid-template-columns: 400px 1fr;
+    background:
+      radial-gradient(ellipse 120% 90% at 18% 0%, #14243F 0%, transparent 55%),
+      radial-gradient(ellipse 110% 85% at 88% 100%, #0D2B33 0%, transparent 58%),
+      linear-gradient(160deg, #0B1220 0%, #0A0F1B 100%);
+    color: #E6EDF7;
+    animation: dsh-veil-in .4s ease both;
+    overflow: hidden;
+  }
+  @keyframes dsh-veil-in { from { opacity: 0; } to { opacity: 1; } }
+
+  .dsh-voice-left {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 40px 28px 30px;
+    margin: 14px; border-radius: 24px;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(255, 255, 255, .09);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .35);
+  }
+
+  .dsh-voice-topline {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; letter-spacing: .2em; color: rgba(230,237,247,.4);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dsh-voice-avatar-wrap {
+    position: relative; width: 168px; height: 168px; margin: 34px 0 26px;
+    display: grid; place-items: center; flex: none;
+  }
+  .dsh-voice-avatar-circle {
+    width: 92px; height: 92px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: radial-gradient(circle at 32% 28%, rgba(106, 184, 255, .30), rgba(43, 92, 168, .22) 58%, rgba(16, 38, 76, .30) 100%);
+    box-shadow: 0 6px 30px rgba(77, 163, 255, .35), 0 0 0 1px rgba(255,255,255,.12) inset;
+    color: #E6EDF7;
+    overflow: hidden;
+  }
+  .dsh-voice-whale { width: 58px; height: auto; }
+  .dsh-voice-avatar-wrap[data-phase="thinking"] .dsh-voice-whale { animation: dsh-whale-swim-slow 3s ease-in-out infinite; }
+  .dsh-voice-avatar-wrap[data-phase="speaking"] .dsh-voice-whale { animation: dsh-whale-swim-fast 1.2s ease-in-out infinite; }
+  @keyframes dsh-whale-swim-slow {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    25% { transform: translateY(-3px) rotate(-3.5deg); }
+    50% { transform: translateY(-4px) rotate(0deg); }
+    75% { transform: translateY(-2px) rotate(3.5deg); }
+  }
+  @keyframes dsh-whale-swim-fast {
+    0%, 100% { transform: translateY(1px) rotate(-6deg); }
+    30% { transform: translateY(-6px) rotate(2deg); }
+    60% { transform: translateY(-2px) rotate(7deg); }
+  }
+  .dsh-voice-ripples { position: absolute; inset: 0; pointer-events: none; }
+  .dsh-voice-ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 1.5px solid rgba(106, 184, 255, .8);
+    will-change: transform, opacity;
+  }
+  .dsh-voice-call[data-phase="thinking"] .dsh-voice-ring { border-color: rgba(148, 163, 184, .55); }
+  .dsh-voice-call[data-phase="speaking"] .dsh-voice-ring { border-color: rgba(94, 234, 212, .8); }
+
+  .dsh-voice-state-word {
+    font-size: 19px; font-weight: 300; letter-spacing: .4em; text-indent: .4em;
+    color: rgba(230,237,247,.92);
+  }
+
+  .dsh-voice-live {
+    min-height: 84px; margin-top: 22px; width: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    text-align: center; padding: 0 6px;
+  }
+  .dsh-voice-live > div { max-height: 52px; overflow-y: auto; width: 100%; scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent; }
+  .dsh-voice-live-interim { color: #8FB6FF; font-size: 14px; line-height: 1.7; }
+  .dsh-voice-live-hint { color: rgba(230,237,247,.4); font-size: 13px; letter-spacing: .05em; }
+  .dsh-voice-live-warn { color: #F5C56B; font-size: 12.5px; line-height: 1.6; }
+  .dsh-voice-live-error { color: #FFA9A2; font-size: 12.5px; line-height: 1.6; }
+
+  .dsh-voice-controls {
+    margin-top: auto;
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 14px; padding: 14px 18px; border-radius: 18px;
+    background: rgba(255, 255, 255, .05);
+    border: 1px solid rgba(255, 255, 255, .08);
+  }
+  .dsh-voice-controls button,
+  .dsh-voice-controls select,
+  .dsh-voice-controls input,
+  .dsh-voice-controls .dsh-voice-ctl { pointer-events: auto; }
+
+  .dsh-voice-hangup {
+    width: 54px; height: 54px; border-radius: 50%; cursor: pointer;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.14);
+    color: #FF6B61;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: border-color .2s, background .2s, transform .1s;
+  }
+  .dsh-voice-hangup:hover {
+    border-color: rgba(255,107,97,.55); background: rgba(255,107,97,.1);
+    box-shadow: 0 0 24px rgba(255,107,97,.2);
+  }
+  .dsh-voice-hangup:active { transform: scale(.94); }
+  .dsh-voice-skip, .dsh-voice-speak-toggle {
+    border: none; background: none; cursor: pointer; color: rgba(230,237,247,.5);
+    font-size: 13px; letter-spacing: .05em; transition: color .2s;
+  }
+  .dsh-voice-skip:hover, .dsh-voice-speak-toggle:hover { color: rgba(230,237,247,.9); }
+  .dsh-voice-skip.hidden { display: none; }
+
+  .dsh-voice-ctl {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: rgba(230,237,247,.55);
+    cursor: pointer; transition: color .2s;
+    position: relative; max-width: 130px;
+  }
+  .dsh-voice-ctl:hover, .dsh-voice-ctl:focus-within { color: rgba(230,237,247,.9); }
+  .dsh-voice-ctl-select {
+    appearance: none; -webkit-appearance: none;
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; border: none; background: none; color: inherit;
+    font-size: 13px;
+  }
+  .dsh-voice-ctl-value { pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dsh-voice-rate { display: inline-flex; align-items: center; gap: 8px; }
+  .dsh-voice-rate-value {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    font-variant-numeric: tabular-nums; min-width: 34px;
+  }
+  .dsh-voice-rate-magnet { display: inline-flex; flex-direction: column; gap: 2px; }
+  .dsh-voice-rate-magnet input[type='range'] {
+    width: 130px; margin: 0; accent-color: #6AB8FF; cursor: pointer; height: 18px;
+  }
+  .dsh-voice-rate-ticks {
+    display: flex; justify-content: space-between; padding: 0 8px; margin: 0 auto; width: 130px;
+  }
+  .dsh-voice-rate-ticks i {
+    width: 3px; height: 3px; border-radius: 50%; background: rgba(230, 237, 247, .3);
+  }
+  .dsh-voice-rate-ticks i.is-active { background: #8FD8FF; }
+  .dsh-voice-st-dot {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 7px;
+    position: relative; top: -2px; background: #5EEAD4; box-shadow: 0 0 8px rgba(94,234,212,.8);
+  }
+  .dsh-voice-speak-toggle.off .dsh-voice-st-dot {
+    background: rgba(148,163,184,.5); box-shadow: none;
+  }
+
+  .dsh-voice-right { min-width: 0; display: flex; }
+  .dsh-voice-stream {
+    flex: 1; overflow-y: auto; padding: 26px 30px 34px;
+    display: flex; flex-direction: column; gap: 18px;
+    scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent;
+  }
+  .dsh-voice-msg { display: flex; gap: 10px; align-items: flex-start; }
+  .dsh-voice-msg-user { justify-content: flex-end; }
+  .dsh-voice-msg-user .dsh-voice-bubble {
+    max-width: 72%;
+    background: rgba(106, 184, 255, .14);
+    border: 1px solid rgba(106, 184, 255, .2);
+    color: #DCEBFF;
+    border-radius: 16px 16px 4px 16px;
+    padding: 10px 14px; font-size: 14px; line-height: 1.75;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .dsh-voice-msg-ai { max-width: 86%; }
+  .dsh-voice-msg-avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex: none; margin-top: 2px;
+    opacity: .92;
+  }
+  .dsh-voice-msg-body {
+    min-width: 0;
+    background: rgba(255, 255, 255, .045);
+    border: 1px solid rgba(255, 255, 255, .07);
+    border-radius: 4px 16px 16px 16px;
+    padding: 10px 14px;
+  }
+  .dsh-voice-prose {
+    margin: 0; font-size: 14px; line-height: 1.85;
+    white-space: pre-wrap; word-break: break-word; color: rgba(230,237,247,.92);
+  }
+  .dsh-voice-prose + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-code, .dsh-voice-code + .dsh-voice-prose { margin-top: 8px; }
+  .dsh-voice-code {
+    margin: 0; padding: 10px 12px; border-radius: 10px; overflow-x: auto;
+    background: rgba(3, 8, 18, .65); border: 1px solid rgba(255,255,255,.06);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.7;
+    color: #B9D4FF; white-space: pre;
+  }
+  .dsh-voice-msg-empty { opacity: .4; }
+  .dsh-voice-caret {
+    display: inline-block; width: 2px; height: 1em; margin-left: 2px;
+    background: #6AB8FF; vertical-align: text-bottom;
+    animation: dsh-caret-blink 1s steps(1) infinite;
+  }
+  @keyframes dsh-caret-blink { 50% { opacity: 0; } }
+
+  @media (max-width: 860px) {
+    .dsh-voice-call { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .dsh-voice-left { margin: 10px; padding: 22px 18px 20px; }
+    .dsh-voice-avatar-wrap { width: 128px; height: 128px; margin: 18px 0 14px; }
+    .dsh-voice-avatar-circle { width: 68px; height: 68px; }
+    .dsh-voice-whale { width: 42px; }
+    .dsh-voice-live { min-height: 64px; margin-top: 12px; }
+    .dsh-voice-stream { padding: 16px 14px 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dsh-voice-call { animation: none !important; }
+    .dsh-voice-caret { animation: none !important; }
+    .dsh-voice-ring { opacity: .18 !important; transform: none !important; }
+    .dsh-voice-whale { animation: none !important; }
+  }
+
+  /* ===== 以上为 1:1 实现；以下为 demo 专用 ===== */
+  .dsh-voice-live > div { display: none; }
+  .dsh-voice-call[data-phase="listening"] .dsh-voice-live-interim { display: block; }
+  .dsh-voice-call[data-phase="thinking"] .dsh-voice-live-hint-thinking { display: block; }
+  .dsh-voice-call[data-phase="speaking"] .dsh-voice-live-hint-speaking { display: block; }
+  .dsh-voice-call[data-phase="idle"] .dsh-voice-live-hint-idle { display: block; }
+  .dsh-voice-call:not([data-phase="speaking"]) .dsh-voice-skip { display: none; }
+  .dsh-voice-call:not([data-phase="thinking"]) .dsh-voice-streaming { display: none; }
+
+  .demo-bar {
+    position: fixed; top: 12px; right: 14px; z-index: 10000;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 12px;
+    background: rgba(10, 14, 24, .78);
+    border: 1px solid rgba(255, 255, 255, .1);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    font-size: 12px;
+  }
+  .demo-bar em { font-style: normal; color: rgba(230,237,247,.4); margin-right: 2px; }
+  .demo-bar button {
+    border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+    background: rgba(255,255,255,.05); color: rgba(230,237,247,.7);
+    font-size: 12px; padding: 5px 12px; cursor: pointer; transition: all .15s;
+  }
+  .demo-bar button:hover { color: #fff; border-color: rgba(255,255,255,.3); }
+  .demo-bar button.is-on { background: rgba(106,184,255,.2); border-color: rgba(106,184,255,.5); color: #DCEBFF; }
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  <em>预览切换</em>
+  <button type="button" data-phase-btn="listening">聆听中</button>
+  <button type="button" data-phase-btn="thinking" class="is-on">思考中</button>
+  <button type="button" data-phase-btn="speaking">播报中</button>
+  <button type="button" data-phase-btn="idle">待命</button>
+</div>
+
+<div class="dsh-voice-call" data-phase="thinking">
+
+  <aside class="dsh-voice-left">
+    <div class="dsh-voice-topline">01:24</div>
+
+    <div class="dsh-voice-avatar-wrap" data-phase="thinking">
+      <div class="dsh-voice-ripples" id="ripples" aria-hidden="true"></div>
+      <div class="dsh-voice-avatar-circle" id="whale-slot"></div>
+    </div>
+
+    <div class="dsh-voice-state-word" id="state-word">思考中</div>
+
+    <div class="dsh-voice-live" aria-live="polite">
+      <div class="dsh-voice-live-interim">帮我把这段代码改成异步的，注意错误处理</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-thinking">正在组织回复…</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-speaking">正在播报，可随时打断</div>
+      <div class="dsh-voice-live-hint dsh-voice-live-hint-idle">说话即发送</div>
+    </div>
+
+    <div class="dsh-voice-controls">
+      <button type="button" class="dsh-voice-speak-toggle" id="auto-speak" title="朗读每轮回复的结论">
+        <span class="dsh-voice-st-dot" aria-hidden="true"></span>自动播报
+      </button>
+      <label class="dsh-voice-ctl" title="说话人">
+        <select class="dsh-voice-ctl-select" id="speaker" aria-label="说话人">
+          <optgroup label="普通话">
+            <option value="Cherry" selected>Cherry</option>
+            <option value="Serena">Serena</option>
+            <option value="Ethan">Ethan</option>
+          </optgroup>
+          <optgroup label="方言">
+            <option value="Suiyao">苏瑶（粤语）</option>
+            <option value="Chenxu">晨煦（吴语）</option>
+          </optgroup>
+        </select>
+        <span class="dsh-voice-ctl-value">Cherry</span>
+      </label>
+      <label class="dsh-voice-ctl dsh-voice-rate" title="语速（磁吸档位，仅本会话）">
+        <span class="dsh-voice-rate-magnet">
+          <input type="range" min="0" max="4" step="1" value="1" aria-label="语速" id="rate" />
+          <span class="dsh-voice-rate-ticks" aria-hidden="true">
+            <i class="is-active"></i><i></i><i></i><i></i><i></i>
+          </span>
+        </span>
+        <span class="dsh-voice-rate-value" id="rate-value">1.0x</span>
+      </label>
+      <button type="button" class="dsh-voice-hangup" title="结束语音对话（Esc）" aria-label="结束语音对话">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+        </svg>
+      </button>
+      <button type="button" class="dsh-voice-skip">跳过播报</button>
+    </div>
+  </aside>
+
+  <section class="dsh-voice-right" aria-label="会话内容">
+    <div class="dsh-voice-stream" id="stream">
+      <div class="dsh-voice-msg dsh-voice-msg-user">
+        <div class="dsh-voice-bubble">你好，帮我写一个防抖函数</div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-ai">
+        <div class="dsh-voice-msg-avatar" id="av1"></div>
+        <div class="dsh-voice-msg-body">
+          <p class="dsh-voice-prose">好的，这是一个标准的防抖实现：利用闭包保存计时器，每次触发时重置延迟，停止触发达到设定时间后才真正执行。</p>
+          <pre class="dsh-voice-code"><code>function debounce(fn, delay = 300) {
+  let timer = null
+  return function (...args) {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
+  }
+}</code></pre>
+          <p class="dsh-voice-prose">适用于搜索框输入、窗口缩放等高频触发场景。需要立即执行版本的话告诉我。</p>
+        </div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-user">
+        <div class="dsh-voice-bubble">那再帮我写一个节流吧，要支持 leading 和 trailing 两种模式</div>
+      </div>
+      <div class="dsh-voice-msg dsh-voice-msg-ai dsh-voice-streaming" id="streaming-msg">
+        <div class="dsh-voice-msg-avatar" id="av2"></div>
+        <div class="dsh-voice-msg-body">
+          <p class="dsh-voice-prose" id="streaming-text"></p>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ===== demo 专用脚本：涟漪引擎（VoiceRipple 程序化模式的 1:1 移植）+ 阶段切换 =====
+(function () {
+  var WHALE = "<svg class=\"dsh-voice-whale\" viewBox=\"0 0 23.16 17.04\" fill=\"none\" aria-hidden=\"true\"><path d=\"M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z\" fill=\"currentColor\"></path></svg>";
+  var SMALL = "<svg viewBox=\"0 0 23.16 17.04\" fill=\"none\" aria-hidden=\"true\" style=\"width:18px;height:auto;color:#E6EDF7\"><path d=\"M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z\" fill=\"currentColor\"></path></svg>";
+  document.getElementById('whale-slot').innerHTML = WHALE;
+  document.getElementById('av1').innerHTML = SMALL;
+  document.getElementById('av2').innerHTML = SMALL;
+
+  var call = document.querySelector('.dsh-voice-call');
+  var wrap = document.querySelector('.dsh-voice-avatar-wrap');
+  var ripples = document.getElementById('ripples');
+  var ringEls = [];
+  [2, 1, 0].forEach(function (i) {
+    var d = document.createElement('div');
+    d.className = 'dsh-voice-ring';
+    d.dataset.ring = String(i);
+    ripples.appendChild(d);
+    ringEls.push(d);
+  });
+
+  var t = 0, amp = 0.3;
+  function phase() { return call.dataset.phase; }
+
+  function procAmp(p) {
+    switch (p) {
+      case 'listening': {
+        var cluster = Math.pow(Math.abs(Math.sin(t * 1.9 + 1)), 2.2);
+        return 0.15 + 0.85 * cluster * (0.6 + 0.4 * Math.sin(t * 13));
+      }
+      case 'thinking': return 0.12 + 0.06 * Math.sin(t * 1.2);
+      case 'speaking': {
+        var pulse = Math.pow(Math.abs(Math.sin(t * 4.4)), 2);
+        return 0.3 + 0.7 * pulse;
+      }
+      default: return 0.2;
+    }
+  }
+
+  function tick() {
+    t += 1 / 60;
+    var p = phase();
+    amp += (procAmp(p) - amp) * 0.12;
+    var n = ringEls.length;
+    for (var i = 0; i < n; i++) {
+      var depth = (n - 1 - Number(ringEls[i].dataset.ring)) / Math.max(1, n - 1);
+      var wave = Math.sin(t * 2.1 - depth * 1.9);
+      var scale = 1 + depth * 0.06, op = 0.08;
+      if (p === 'listening') { scale = 1 + depth * (0.10 + amp * 0.55) * (0.72 + 0.28 * wave); op = 0.14 + amp * 0.5 * (1 - depth * 0.55); }
+      else if (p === 'thinking') { scale = 1 + depth * 0.16 * (0.7 + 0.3 * wave); op = 0.1 + 0.06 * Math.sin(t * 1.2); }
+      else if (p === 'speaking') { scale = 1 + depth * (0.16 + amp * 0.6) * (0.75 + 0.25 * wave); op = 0.16 + amp * 0.55 * (1 - depth * 0.55); }
+      ringEls[i].style.transform = 'scale(' + scale.toFixed(3) + ')';
+      ringEls[i].style.opacity = op.toFixed(3);
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // 阶段切换（demo 顶栏）
+  var WORDS = { idle: '待命', listening: '聆听中', thinking: '思考中', speaking: '播报中' };
+  var STREAM_FULL = '节流和防抖的区别在于保证执行频率：防抖是"停手后才执行"，节流是"最多每 N 毫秒执行一次"。下面是同时支持 leading 与 trailing 的完整实现……（此处为流式生成中的示意文本，思考阶段会逐字生长，播报阶段完整显示）';
+  var shown = 0;
+  var streamText = document.getElementById('streaming-text');
+
+  function renderStream() {
+    streamText.textContent = STREAM_FULL.slice(0, shown);
+    if (shown < STREAM_FULL.length) {
+      streamText.insertAdjacentHTML('beforeend', '<span class="dsh-voice-caret" aria-hidden="true"></span>');
+    }
+  }
+  setInterval(function () {
+    if (phase() !== 'thinking') return;
+    shown = Math.min(STREAM_FULL.length, shown + 2);
+    renderStream();
+  }, 50);
+
+  document.querySelectorAll('[data-phase-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var p = btn.dataset.phaseBtn;
+      call.dataset.phase = p;
+      wrap.dataset.phase = p;
+      document.getElementById('state-word').textContent = WORDS[p];
+      document.querySelectorAll('[data-phase-btn]').forEach(function (b) { b.classList.toggle('is-on', b === btn); });
+      if (p === 'thinking' && shown >= STREAM_FULL.length) shown = 0;
+      if (p !== 'thinking') { shown = STREAM_FULL.length; renderStream(); }
+    });
+  });
+
+  // 控制条：自动播报开关 / 语速磁吸 / 说话人回显（真实组件由 controller 接管）
+  var auto = document.getElementById('auto-speak');
+  auto.addEventListener('click', function () { auto.classList.toggle('off'); });
+  var STOPS = ['1.0x', '1.2x', '1.5x', '1.8x', '2.0x'];
+  var rate = document.getElementById('rate');
+  rate.addEventListener('input', function () {
+    document.getElementById('rate-value').textContent = STOPS[Number(rate.value)];
+    document.querySelectorAll('.dsh-voice-rate-ticks i').forEach(function (tick, i) {
+      tick.classList.toggle('is-active', i === Number(rate.value));
+    });
+  });
+  var speaker = document.getElementById('speaker');
+  speaker.addEventListener('change', function () {
+    document.querySelector('.dsh-voice-ctl-value').textContent = speaker.options[speaker.selectedIndex].text;
+  });
+
+  // 计时器
+  var sec = 84;
+  setInterval(function () {
+    sec++;
+    var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    var ss = String(sec % 60).padStart(2, '0');
+    document.querySelector('.dsh-voice-topline').textContent = mm + ':' + ss;
+  }, 1000);
+})();
+</script>
+</body>
+</html>
