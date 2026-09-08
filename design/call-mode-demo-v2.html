@@ -34,11 +34,56 @@
   /* ===== 通话舞台：亮色画布 + 两块磨砂窗 ===== */
   .dsh-voice-call {
     position: relative; height: 100vh;
-    display: grid; grid-template-columns: 380px 1fr; gap: 16px;
+    display: flex; justify-content: center;
     padding: 16px;
     background: var(--canvas);
     color: var(--ink);
     overflow: hidden;
+  }
+  /* 左栏：固定 380px */
+  .dsh-voice-left { flex: 0 0 380px; }
+  /* 右栏折叠：flex-grow + margin 平滑过渡；收起后左栏精确居中 */
+  .dsh-voice-right {
+    flex: 1 1 0; min-width: 0; margin-left: 16px;
+    transition: flex-grow .32s var(--ease), margin-left .32s var(--ease), opacity .25s var(--ease), transform .32s var(--ease);
+  }
+  .dsh-voice-call.is-collapsed .dsh-voice-right {
+    flex-grow: 0; margin-left: 0;
+    opacity: 0; transform: translateX(24px); pointer-events: none; overflow: hidden;
+  }
+  /* 折叠把手：悬浮于右缘，独立于右栏（折叠后仍可点回） */
+  .dsh-voice-collapse {
+    position: absolute; top: 50%; right: 12px;
+    transform: translateY(-50%);
+    width: 26px; height: 56px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-pill);
+    background: var(--glass-strong);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+    display: grid; place-items: center;
+    cursor: pointer; padding: 0;
+    transition: background .15s var(--ease);
+    z-index: 10;
+  }
+  .dsh-voice-collapse:hover { background: #fff; }
+  .dsh-voice-collapse i {
+    width: 8px; height: 8px;
+    border-left: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+    transition: transform .3s var(--ease);
+    transform: rotate(-45deg) scale(.9);
+    margin-right: -2px;
+  }
+  .dsh-voice-call.is-collapsed .dsh-voice-collapse i {
+    transform: rotate(135deg) scale(.9);
+    margin-right: 2px;
+  }
+  /* 通话时长（当前通话，非会话）：hero 正上方居中 */
+  .dsh-voice-duration {
+    margin-top: 8px; text-align: center;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 15px; font-weight: 500;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
   }
   .dsh-voice-left, .dsh-voice-right {
     border-radius: var(--radius-window);
@@ -61,11 +106,7 @@
     padding: 20px 24px 24px;
   }
   .dsh-voice-topline {
-    align-self: flex-end;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 13px; font-weight: 500;
-    color: var(--ink-3);
-    font-variant-numeric: tabular-nums;
+    display: none;
   }
 
   .dsh-voice-hero {
@@ -85,6 +126,19 @@
     color: var(--ink);
   }
   .dsh-voice-whale { width: 46px; height: auto; display: block; }
+  /* 呼吸光晕：主体背后的 blur 圈，opacity/transform 由 JS 驱动（放大时边缘晕开） */
+  .dsh-voice-halo {
+    position: absolute; inset: -20%;
+    border-radius: 50%;
+    filter: blur(12px);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .dsh-voice-halo-blue { background: radial-gradient(circle, rgba(0, 122, 255, .38), rgba(0, 122, 255, .10) 58%, transparent 75%); }
+  .dsh-voice-halo-red { background: radial-gradient(circle, rgba(255, 59, 48, .42), rgba(255, 59, 48, .10) 58%, transparent 75%); }
+  .dsh-voice-hangup-wrap { position: relative; flex: none; display: grid; place-items: center; }
+  .dsh-voice-hangup-wrap .dsh-voice-hangup { position: relative; z-index: 1; }
   .dsh-voice-avatar-wrap[data-phase="speaking"] .dsh-voice-whale {
     animation: none; /* 幅度由 JS 逐帧驱动（音量呼吸） */
     will-change: transform;
@@ -205,7 +259,7 @@
   .dsh-voice-skip.hidden { display: none; }
 
   /* ===== 右栏：iMessage 式会话流 ===== */
-  .dsh-voice-right { min-width: 0; display: flex; }
+  .dsh-voice-right { min-width: 0; display: flex; overflow: hidden; }
   .dsh-voice-stream {
     flex: 1; overflow-y: auto; padding: 24px 28px 28px;
     display: flex; flex-direction: column; gap: 14px;
@@ -306,7 +360,10 @@
   .demo-bar button.is-on { background: var(--ink); color: #fff; }
 
   @media (max-width: 860px) {
-    .dsh-voice-call { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 10px; gap: 10px; }
+    .dsh-voice-call { flex-direction: column; padding: 10px; }
+    .dsh-voice-left { flex: 0 0 auto; }
+    .dsh-voice-right { flex: 1 1 0; margin-left: 0; margin-top: 10px; }
+    .dsh-voice-collapse { top: auto; bottom: 14px; }
     .dsh-voice-left { padding: 16px 18px 18px; }
     .dsh-voice-hero { gap: 12px; margin-top: 20px; }
     .dsh-voice-avatar-wrap { width: 76px; height: 76px; }
@@ -323,6 +380,7 @@
     .dsh-voice-wave-bar { transform: none !important; }
     .dsh-voice-whale { transform: none !important; }
     .dsh-voice-hangup { transform: none !important; }
+    .dsh-voice-halo { display: none !important; }
   }
 </style>
 </head>
@@ -334,25 +392,31 @@
   <button type="button" data-phase-btn="thinking" class="is-on">思考中</button>
   <button type="button" data-phase-btn="speaking">播报中</button>
   <button type="button" data-phase-btn="idle">待命</button>
+  <em>通话</em>
+  <button type="button" id="demo-reset">重置时长</button>
 </div>
 
 <div class="dsh-voice-call" data-phase="thinking">
 
   <aside class="dsh-voice-left">
-    <div class="dsh-voice-topline">01:24</div>
+    <div class="dsh-voice-duration" id="duration">00:00</div>
 
     <div class="dsh-voice-hero">
       <div class="dsh-voice-avatar-wrap" data-phase="thinking">
+        <span class="dsh-voice-halo dsh-voice-halo-blue" id="halo-whale" aria-hidden="true"></span>
         <div class="dsh-voice-avatar-circle" id="whale-slot"></div>
       </div>
 
       <div class="dsh-voice-wave" id="wave" aria-hidden="true"></div>
 
+      <div class="dsh-voice-hangup-wrap">
+        <span class="dsh-voice-halo dsh-voice-halo-red" id="halo-phone" aria-hidden="true"></span>
       <button type="button" class="dsh-voice-hangup" id="hangup" title="结束语音对话（Esc）" aria-label="结束语音对话">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
         </svg>
       </button>
+      </div>
     </div>
 
     <div class="dsh-voice-state-word" id="state-word">思考中</div>
@@ -430,6 +494,8 @@
       </div>
     </div>
   </section>
+
+  <button type="button" class="dsh-voice-collapse" id="collapse" title="收起信息流" aria-label="收起或展开信息流"><i></i></button>
 </div>
 
 <script>
@@ -442,12 +508,14 @@
   document.getElementById('av2').innerHTML = SMALL;
   document.getElementById('av3').innerHTML = SMALL;
 
-  var call = document.querySelector('.dsh-voice-call');
   var wrap = document.querySelector('.dsh-voice-avatar-wrap');
   var whale = document.querySelector('#whale-slot svg');
   var BARS = 19;
   var wave = document.getElementById('wave');
   var hangupBtn = document.getElementById('hangup');
+  var haloWhale = document.getElementById('halo-whale');
+  var haloPhone = document.getElementById('halo-phone');
+  var call = document.querySelector('.dsh-voice-call');
   var barEls = [];
   for (var i = 0; i < BARS; i++) {
     var b = document.createElement('div');
@@ -456,7 +524,7 @@
     barEls.push(b);
   }
 
-  var t = 0, amp = 0.3;
+  var t = 0, amp = 0.3, ampSlow = 0.3;
   function phase() { return call.dataset.phase; }
 
   // 程序化振幅：语音式簇（聆听）、脉冲（播报）、微息（思考/待命）
@@ -492,14 +560,39 @@
       else h = 5;
       barEls[i].style.transform = 'scaleY(' + (h / 6).toFixed(3) + ')';
     }
-    // 双向呼吸：谁在说话，谁的代表就随振幅起伏
-    if (p === 'speaking') whale.style.transform = 'scale(' + (1 + amp * 0.06).toFixed(3) + ')';
-    else whale.style.transform = '';
-    if (p === 'listening') hangupBtn.style.transform = 'scale(' + (1 + amp * 0.08).toFixed(3) + ')';
-    else hangupBtn.style.transform = '';
+    // 双向呼吸（双层信号）：
+    //   breath = 3.6s 基础节律（静息也在缓缓呼吸，活物感）
+    //   ampSlow = 重滤波音量（说话时饱满鼓起，停顿缓缓回落，不抖）
+    var breath = 0.5 + 0.5 * Math.sin(t * (Math.PI * 2) / 3.6 - Math.PI / 2); // 0..1，从谷起步
+    ampSlow += (amp - ampSlow) * 0.06;
+    var drive = breath * 0.02 + ampSlow * 0.05;
+
+    if (p === 'speaking') {
+      whale.style.transform = 'scale(' + (1 + drive).toFixed(4) + ')';
+      haloWhale.style.opacity = (0.18 + drive * 5.2).toFixed(3);
+      haloWhale.style.transform = 'scale(' + (1 + drive * 0.9).toFixed(4) + ')';
+    } else {
+      whale.style.transform = '';
+      haloWhale.style.opacity = '0';
+    }
+    if (p === 'listening') {
+      hangupBtn.style.transform = 'scale(' + (1 + drive * 1.15).toFixed(4) + ')';
+      haloPhone.style.opacity = (0.18 + drive * 5.5).toFixed(3);
+      haloPhone.style.transform = 'scale(' + (1 + drive * 0.9).toFixed(4) + ')';
+    } else {
+      hangupBtn.style.transform = '';
+      haloPhone.style.opacity = '0';
+    }
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
+
+  // 右栏折叠/展开：左栏随之整体居中（网格轨道动画）
+  var collapseBtn = document.getElementById('collapse');
+  collapseBtn.addEventListener('click', function () {
+    call.classList.toggle('is-collapsed');
+    collapseBtn.title = call.classList.contains('is-collapsed') ? '展开信息流' : '收起信息流';
+  });
 
   // 阶段切换
   var WORDS = { idle: '待命', listening: '聆听中', thinking: '思考中', speaking: '播报中' };
@@ -541,14 +634,18 @@
     document.getElementById('rate-label').textContent = rate.value + 'x';
   });
 
-  // 计时器
-  var sec = 84;
-  setInterval(function () {
-    sec++;
-    var mm = String(Math.floor(sec / 60)).padStart(2, '0');
-    var ss = String(sec % 60).padStart(2, '0');
-    document.querySelector('.dsh-voice-topline').textContent = mm + ':' + ss;
-  }, 1000);
+  // 当前通话时长（挂断重开即归零；demo 用“重置时长”演示）
+  var callSec = 0;
+  var durationEl = document.getElementById('duration');
+  function renderDuration() {
+    var mm = String(Math.floor(callSec / 60)).padStart(2, '0');
+    var ss = String(callSec % 60).padStart(2, '0');
+    durationEl.textContent = mm + ':' + ss;
+  }
+  setInterval(function () { callSec++; renderDuration(); }, 1000);
+  document.getElementById('demo-reset').addEventListener('click', function () {
+    callSec = 0; renderDuration();
+  });
 })();
 </script>
 </body>
