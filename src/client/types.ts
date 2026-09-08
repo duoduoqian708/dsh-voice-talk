@@ -1,0 +1,25 @@
+// Shared voice-talk types (status surface consumed by the UI components).
+
+/** What the voice loop is currently doing. */
+export type VoicePhase = 'idle' | 'listening' | 'thinking' | 'speaking'
+
+/** Voice system switch: off, or the hands-free loop the user armed. */
+export type VoiceMode = 'off' | 'loop'
+
+/** Published status snapshot; reference-stable between changes. */
+export interface VoiceStatus {
+  readonly mode: VoiceMode
+  readonly phase: VoicePhase
+  /** Live interim transcript shown while listening. */
+  readonly interim: string
+  /** Text currently being spoken (the call overlay AI caption). */
+  readonly caption: string
+  /** Last prompt the voice loop submitted (feeds the caption history). */
+  readonly lastPrompt: string
+  /** Pending interaction cards (approvals/questions) on the bound session. */
+  readonly pendingCount: number
+  /** Last failure surfaced to the user (sticky until the next phase move). */
+  readonly error: string | null
+  /** Auto-readout switch (mirrors the settings namespace, locally overridable). */
+  readonly autoSpeak: boolean
+}

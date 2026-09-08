@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>语音对话 · 深海声呐 HUD 视觉稿</title>
+<style>
+  /* ============================================================
+     深海声呐 — dsh-voice-talk call-mode HUD 视觉稿
+     色板：深渊 #060B14 / 声呐青 #5EEAD4 / 琥珀 #F5B84B / 波蓝 #6AB8FF
+     文字 #E6EDF7 / 次级 #8CA0B8
+     ============================================================ */
+  :root {
+    --abyss: #060B14;
+    --sonar: #5EEAD4;
+    --amber: #F5B84B;
+    --wave: #6AB8FF;
+    --text: #E6EDF7;
+    --text-dim: #8CA0B8;
+    --glass: rgba(10, 16, 26, .58);
+    --hairline: rgba(142, 164, 190, .22);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--abyss);
+    color: var(--text);
+    overflow: hidden;
+  }
+
+  /* ---------- 底层「页面」模拟层：模拟你正在工作的 dsh 界面 ---------- */
+  .fake-page {
+    position: fixed; inset: 0;
+    background:
+      linear-gradient(180deg, #0C1420 0%, #0A101A 40%, #081018 100%);
+    display: flex;
+  }
+  .fake-sidebar {
+    width: 240px; border-right: 1px solid rgba(142,164,190,.12);
+    padding: 20px 16px; display: flex; flex-direction: column; gap: 14px;
+    background: rgba(255,255,255,.015);
+  }
+  .fake-logo { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 13px; }
+  .fake-logo .whale { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #1E4A8F, #0E2A55); }
+  .fake-item { height: 34px; border-radius: 8px; background: rgba(142,164,190,.07); }
+  .fake-item.active { background: rgba(94,234,212,.10); border: 1px solid rgba(94,234,212,.18); }
+  .fake-main { flex: 1; display: flex; flex-direction: column; padding: 28px 40px; gap: 14px; }
+  .fake-title { height: 22px; width: 260px; border-radius: 6px; background: rgba(142,164,190,.14); }
+  .fake-line { height: 14px; border-radius: 6px; background: rgba(142,164,190,.07); }
+  .fake-line.w60 { width: 60%; } .fake-line.w80 { width: 80%; } .fake-line.w45 { width: 45%; }
+  .fake-code {
+    height: 120px; border-radius: 10px; margin-top: 8px;
+    background: rgba(0,0,0,.35); border: 1px solid rgba(142,164,190,.10);
+  }
+  .fake-composer {
+    margin-top: auto; height: 52px; border-radius: 12px;
+    border: 1px solid rgba(142,164,190,.14); background: rgba(20,28,40,.6);
+  }
+
+  /* ---------- 通话层：径向晕影 + 微噪点 + 毛玻璃 ---------- */
+  .veil {
+    position: fixed; inset: 0; z-index: 10;
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 46%, rgba(4, 8, 16, .88) 0%, rgba(4, 8, 16, .74) 45%, rgba(6, 11, 20, .42) 100%);
+    backdrop-filter: blur(9px) saturate(.92);
+    -webkit-backdrop-filter: blur(9px) saturate(.92);
+    display: flex; align-items: center; justify-content: center;
+    animation: veil-in .5s ease both;
+  }
+  /* 微噪点：两层极细的重复渐变叠加，避免大色块的塑料感 */
+  .veil::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.008) 0 1px, transparent 1px 4px);
+    mix-blend-mode: overlay;
+  }
+  @keyframes veil-in {
+    from { opacity: 0; } to { opacity: 1; }
+  }
+
+  .stage {
+    position: relative; z-index: 2;
+    width: min(560px, 88vw);
+    height: min(760px, 92vh);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 34px 20px 40px;
+    animation: stage-in .55s cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes stage-in {
+    from { opacity: 0; transform: scale(.96) translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* ---------- 顶部：eyebrow + 通话计时 ---------- */
+  .topline {
+    display: flex; align-items: center; gap: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .topline .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent, var(--sonar)); box-shadow: 0 0 8px var(--accent, var(--sonar)); }
+  .topline .timer { font-variant-numeric: tabular-nums; color: var(--text); letter-spacing: .14em; }
+
+  /* ---------- 中央：声核 ---------- */
+  .orb-zone {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 26px;
+  }
+  canvas.orb { width: 280px; height: 280px; display: block; }
+  .phase-word {
+    font-size: 17px; letter-spacing: .42em; text-indent: .42em;
+    color: var(--text); font-weight: 500;
+    transition: color .45s ease;
+  }
+
+  /* ---------- 字幕：影院玻璃条 ---------- */
+  .captions {
+    width: 100%; max-height: 168px; overflow-y: auto;
+    background: var(--glass);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 14px 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    scrollbar-width: thin; scrollbar-color: rgba(142,164,190,.25) transparent;
+  }
+  .cap { font-size: 13.5px; line-height: 1.65; animation: cap-in .4s ease both; }
+  .cap .who {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; letter-spacing: .18em; margin-right: 8px; opacity: .75;
+  }
+  .cap.user { color: #BFD3EC; }
+  .cap.user .who { color: var(--wave); }
+  .cap.ai { color: #D8F5EA; }
+  .cap.ai .who { color: var(--sonar); }
+  @keyframes cap-in {
+    from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; }
+  }
+
+  /* ---------- 底部控制：挂机 + 跳过 ---------- */
+  .controls { display: flex; align-items: center; gap: 18px; margin-top: 26px; height: 64px; }
+  .hangup {
+    width: 62px; height: 62px; border-radius: 50%; border: none; cursor: pointer;
+    background: radial-gradient(circle at 32% 28%, #FF7B7B, #E02D2D 68%);
+    color: #fff; display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 32px rgba(224, 45, 45, .38), inset 0 1px 0 rgba(255,255,255,.28);
+    transition: transform .16s cubic-bezier(.34,1.56,.64,1), box-shadow .16s;
+  }
+  .hangup:hover { transform: scale(1.08); box-shadow: 0 14px 40px rgba(224,45,45,.5), inset 0 1px 0 rgba(255,255,255,.28); }
+  .hangup:active { transform: scale(.94); }
+  .skip {
+    height: 38px; padding: 0 18px; border-radius: 19px; cursor: pointer;
+    border: 1px solid var(--hairline); background: rgba(20,28,40,.55);
+    color: var(--text-dim); font-size: 13px; letter-spacing: .08em;
+    transition: opacity .3s, transform .3s, border-color .3s;
+  }
+  .skip:hover { color: var(--text); border-color: rgba(142,164,190,.4); }
+  .skip.hidden { opacity: 0; transform: translateX(8px); pointer-events: none; }
+  .hangup-hint { font-size: 11px; color: var(--text-dim); letter-spacing: .1em; margin-top: 10px; opacity: .7; }
+
+  /* ---------- 预览控制台（不属于 HUD，只是给你切态用） ---------- */
+  .demo-panel {
+    position: fixed; left: 16px; bottom: 16px; z-index: 20;
+    display: flex; gap: 8px; padding: 10px;
+    background: rgba(10,16,26,.7); border: 1px solid var(--hairline); border-radius: 12px;
+    backdrop-filter: blur(10px);
+  }
+  .demo-panel button {
+    padding: 7px 14px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+    background: rgba(142,164,190,.1); color: var(--text-dim); font-size: 12.5px;
+    transition: all .2s;
+  }
+  .demo-panel button.on { background: rgba(94,234,212,.12); border-color: rgba(94,234,212,.4); color: var(--sonar); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 底层模拟页面 -->
+<div class="fake-page" aria-hidden="true">
+  <div class="fake-sidebar">
+    <div class="fake-logo"><div class="whale"></div>DeepSeek Harness</div>
+    <div class="fake-item active"></div>
+    <div class="fake-item"></div>
+    <div class="fake-item"></div>
+    <div class="fake-item"></div>
+  </div>
+  <div class="fake-main">
+    <div class="fake-title"></div>
+    <div class="fake-line w60"></div>
+    <div class="fake-line w80"></div>
+    <div class="fake-line w45"></div>
+    <div class="fake-code"></div>
+    <div class="fake-composer"></div>
+  </div>
+</div>
+
+<!-- 通话层 -->
+<div class="veil">
+  <div class="stage">
+    <div class="topline">
+      <span class="dot"></span>
+      <span>语音对话</span>
+      <span class="timer" id="timer">00:00</span>
+    </div>
+
+    <div class="orb-zone">
+      <canvas class="orb" id="orb" width="560" height="560"></canvas>
+      <div class="phase-word" id="phaseWord">聆听中</div>
+    </div>
+
+    <div class="captions" id="captions">
+      <div class="cap ai"><span class="who">播报</span>已定位到连接池配置文件，把最大连接数从 10 调到 32，并在超时分支补了归还逻辑。</div>
+      <div class="cap user"><span class="who">你</span>那连接池改完之后会不会影响正在跑的定时任务？</div>
+    </div>
+
+    <div class="controls">
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <button class="hangup" title="挂断（Esc）">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+          </svg>
+        </button>
+        <span class="hangup-hint">挂断 · Esc</span>
+      </div>
+      <button class="skip hidden" id="skip">跳过播报</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预览控制台 -->
+<div class="demo-panel">
+  <button data-mode="listening" class="on">聆听</button>
+  <button data-mode="thinking">思考</button>
+  <button data-mode="speaking">播报</button>
+</div>
+
+<script>
+/* ============ 深海声呐 · 声核 ============
+   128 根环形频谱条。预览页用程序化振幅模拟三种相位；
+   插件实现里：聆听=AnalyserNode 真实振幅，其余=程序化。 */
+
+const MODES = {
+  listening: { color: [94, 234, 212], label: '聆听中', word: '聆听中' },
+  thinking:  { color: [245, 184, 75],  label: '思考中', word: '思考中' },
+  speaking:  { color: [106, 184, 255], label: '播报中', word: '播报中' },
+}
+
+let mode = 'listening'
+let t = 0
+const canvas = document.getElementById('orb')
+const ctx = canvas.getContext('2d')
+const phaseWord = document.getElementById('phaseWord')
+const skipBtn = document.getElementById('skip')
+const BAR_COUNT = 128
+
+/* 状态切换的平滑插值：颜色与能量都缓动过渡 */
+const blend = { r: 94, g: 234, b: 212, energy: .6 }
+
+function targetEnergy() {
+  if (mode === 'listening') return .55 + .35 * Math.abs(Math.sin(t * 2.1))
+  if (mode === 'thinking') return .3
+  return .8
+}
+function targetColor() {
+  return MODES[mode].color
+}
+
+/* 程序化振幅场：聆听=语音段落感（成簇起伏），思考=低平缓动，播报=波浪推进 */
+function barEnergy(i, time) {
+  const seed = Math.sin(i * 12.9898) * 43758.5453
+  const jitter = seed - Math.floor(seed)
+  if (mode === 'listening') {
+    // 语句簇：慢包络 × 快抖动，像真人在说话
+    const cluster = Math.pow(Math.abs(Math.sin(time * 1.7 + i * .12)), 1.6)
+    const fast = .55 + .45 * Math.sin(time * 14 + jitter * 40)
+    return .18 + .82 * cluster * fast
+  }
+  if (mode === 'thinking') {
+    return .12 + .1 * Math.sin(time * 2.4 + jitter * 6)
+  }
+  // speaking：从中心发出的行波
+  const wave = Math.pow(Math.max(0, Math.sin(i * .09 - time * 5.2)), 2.4)
+  return .16 + .84 * wave * (0.75 + .25 * Math.sin(time * 22 + jitter * 30))
+}
+
+function draw() {
+  t += 1 / 60
+  const dpr = 2
+  const size = 280
+  const W = size * dpr
+  ctx.clearRect(0, 0, W, W)
+
+  // 颜色缓动
+  const [tr, tg, tb] = targetColor()
+  blend.r += (tr - blend.r) * .06
+  blend.g += (tg - blend.g) * .06
+  blend.b += (tb - blend.b) * .06
+  blend.energy += (targetEnergy() - blend.energy) * .05
+  const [r, g, b] = [blend.r | 0, blend.g | 0, blend.b | 0]
+  const rgb = `${r},${g},${b}`
+
+  document.documentElement.style.setProperty('--accent', `rgb(${rgb})`)
+  phaseWord.style.color = `rgb(${Math.min(255,r+120)},${Math.min(255,g+120)},${Math.min(255,b+120)})`
+
+  const cx = W / 2, cy = W / 2
+  const baseR = 150 * dpr / 2        // 核心半径
+  const maxBar = 52 * dpr / 2        // 频谱条最大长度
+
+  // ---- 扩散脉冲环（声呐波）：聆听/播报时从核心向外发射 ----
+  if (mode === 'listening' || mode === 'speaking') {
+    const interval = mode === 'listening' ? 1.6 : 1.1
+    for (let k = 0; k < 3; k++) {
+      const phase = ((t / interval) + k / 3) % 1
+      const pr = baseR * (1 + phase * 1.35)
+      const alpha = (1 - phase) * .32
+      ctx.beginPath()
+      ctx.arc(cx, cy, pr, 0, Math.PI * 2)
+      ctx.strokeStyle = `rgba(${rgb},${alpha})`
+      ctx.lineWidth = (1.5 - phase) * dpr
+      ctx.stroke()
+    }
+  }
+
+  // ---- 环形频谱条 ----
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const angle = (i / BAR_COUNT) * Math.PI * 2 - Math.PI / 2
+    const e = barEnergy(i, t)
+    const len = 4 * dpr + maxBar * e
+    const x1 = cx + Math.cos(angle) * baseR
+    const y1 = cy + Math.sin(angle) * baseR
+    const x2 = cx + Math.cos(angle) * (baseR + len)
+    const y2 = cy + Math.sin(angle) * (baseR + len)
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.lineCap = 'round'
+    ctx.lineWidth = 2.1 * dpr
+    ctx.strokeStyle = `rgba(${rgb},${.28 + .72 * e})`
+    ctx.stroke()
+  }
+
+  // ---- 核心：呼吸圆 ----
+  const breathe = mode === 'listening'
+    ? 1 + .05 * Math.sin(t * 3.4)
+    : mode === 'speaking' ? 1 + .07 * Math.sin(t * 6) : 1 + .015 * Math.sin(t * 1.8)
+  const coreR = 92 * dpr / 2 * breathe
+  const grad = ctx.createRadialGradient(cx - coreR * .3, cy - coreR * .35, coreR * .15, cx, cy, coreR)
+  grad.addColorStop(0, `rgba(${r + 90 > 255 ? 255 : r + 90},${g + 90 > 255 ? 255 : g + 90},${b + 90 > 255 ? 255 : b + 90},.95)`)
+  grad.addColorStop(.55, `rgba(${rgb},.78)`)
+  grad.addColorStop(1, `rgba(${r * .35 | 0},${g * .35 | 0},${b * .38 | 0},.9)`)
+  ctx.beginPath()
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2)
+  ctx.fillStyle = grad
+  ctx.shadowColor = `rgba(${rgb},.5)`
+  ctx.shadowBlur = 44 * dpr / 2
+  ctx.fill()
+  ctx.shadowBlur = 0
+
+  // ---- 核心内的鲸尾/声波纹（思考时旋转的细弧） ----
+  if (mode === 'thinking') {
+    for (let k = 0; k < 2; k++) {
+      const start = t * 1.4 + k * Math.PI
+      ctx.beginPath()
+      ctx.arc(cx, cy, coreR * .58, start, start + Math.PI * .7)
+      ctx.strokeStyle = `rgba(255,255,255,.32)`
+      ctx.lineWidth = 2 * dpr
+      ctx.lineCap = 'round'
+      ctx.stroke()
+    }
+  } else {
+    // 核心 + 深色麦克风剪影感的短竖线（三根，表示收音）
+    ctx.strokeStyle = 'rgba(6,11,20,.82)'
+    ctx.lineWidth = 3.4 * dpr
+    ctx.lineCap = 'round'
+    const amp = mode === 'speaking' ? 16 : mode === 'listening' ? 10 : 4
+    const heights = [22, 34, 22]
+    for (let k = -1; k <= 1; k++) {
+      const h = (heights[k + 1] / 2 + amp * Math.abs(Math.sin(t * 7 + k))) * dpr / 2
+      ctx.beginPath()
+      ctx.moveTo(cx + k * 15 * dpr / 2, cy - h)
+      ctx.lineTo(cx + k * 15 * dpr / 2, cy + h)
+      ctx.stroke()
+    }
+  }
+
+  requestAnimationFrame(draw)
+}
+draw()
+
+/* ---- 相位切换 ---- */
+function setMode(next) {
+  mode = next
+  phaseWord.textContent = MODES[next].word
+  skipBtn.classList.toggle('hidden', next !== 'speaking')
+  document.querySelectorAll('.demo-panel button').forEach(b =>
+    b.classList.toggle('on', b.dataset.mode === next))
+  // 播报态补一条示例播报字幕，演示字幕滚动
+  if (next === 'speaking') pushCap('ai', '连接数调大后不会影响定时任务，归还逻辑保证空闲连接被及时回收，可以放心重启服务验证。')
+}
+document.querySelectorAll('.demo-panel button').forEach(b =>
+  b.addEventListener('click', () => setMode(b.dataset.mode)))
+
+/* ---- 字幕滚动 ---- */
+const captions = document.getElementById('captions')
+function pushCap(kind, text) {
+  const div = document.createElement('div')
+  div.className = `cap ${kind}`
+  div.innerHTML = `<span class="who">${kind === 'ai' ? '播报' : '你'}</span>${text}`
+  captions.appendChild(div)
+  while (captions.children.length > 6) captions.firstChild.remove()
+  captions.scrollTop = captions.scrollHeight
+}
+
+/* ---- 计时器 ---- */
+const timerEl = document.getElementById('timer')
+const start = Date.now()
+setInterval(() => {
+  const s = Math.floor((Date.now() - start) / 1000)
+  timerEl.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}, 1000)
+</script>
+</body>
+</html>

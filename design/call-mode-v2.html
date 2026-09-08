@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>语音对话 HUD · v2 双方向视觉稿</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: #070A14; color: #E6EDF7; overflow: hidden;
+  }
+  .fake { position: fixed; inset: 0; background: linear-gradient(180deg, #0B1120, #090E19); display: flex; gap: 24px; padding: 28px; }
+  .fake-col { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .fake-bar { height: 14px; border-radius: 7px; background: rgba(148,163,184,.06); }
+  .fake-bar.w50 { width: 50%; } .fake-bar.w70 { width: 70%; } .fake-bar.w40 { width: 40%; }
+  .fake-block { height: 110px; border-radius: 12px; background: rgba(148,163,184,.05); }
+
+  .aurora { position: fixed; inset: 0; z-index: 5; pointer-events: none; filter: blur(70px); opacity: .8; }
+  .aurora .a { position: absolute; border-radius: 50%; transition: opacity 1.2s ease; }
+  .a1 { width: 60vw; height: 60vw; left: -12vw; top: -18vh;
+        background: radial-gradient(circle, rgba(30,58,138,.55), transparent 65%);
+        animation: drift1 26s ease-in-out infinite alternate; }
+  .a2 { width: 55vw; height: 55vw; right: -14vw; bottom: -20vh;
+        background: radial-gradient(circle, rgba(19,110,110,.4), transparent 65%);
+        animation: drift2 32s ease-in-out infinite alternate; }
+  .a3 { width: 42vw; height: 42vw; left: 34vw; top: 30vh;
+        background: radial-gradient(circle, rgba(88,45,144,.34), transparent 65%);
+        animation: drift3 38s ease-in-out infinite alternate; }
+  @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(9vw,7vh) scale(1.18); } }
+  @keyframes drift2 { from { transform: translate(0,0) scale(1.1); } to { transform: translate(-8vw,-9vh) scale(.9); } }
+  @keyframes drift3 { from { transform: translate(0,0) scale(.95); } to { transform: translate(-6vw,9vh) scale(1.15); } }
+  body[data-state="thinking"] .aurora { opacity: .5; }
+  body[data-state="speaking"] .aurora { opacity: 1; }
+
+  .grain { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: .5;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(255,255,255,.008) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.006) 0 1px, transparent 1px 4px); }
+
+  .stage { position: fixed; inset: 0; z-index: 8; display: flex; flex-direction: column; align-items: center;
+    padding: 34px 24px 44px; animation: stage-in .7s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes stage-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+
+  .topline { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+    letter-spacing: .2em; color: rgba(230,237,247,.38); font-variant-numeric: tabular-nums; }
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 34px; width: 100%; }
+  .state-word { font-size: 21px; font-weight: 250; letter-spacing: .42em; text-indent: .42em;
+    color: rgba(230,237,247,.92); text-shadow: 0 2px 24px rgba(0,0,0,.6); }
+
+  .blob-zone { position: relative; width: 320px; height: 320px; }
+  .goo { position: absolute; inset: 0; filter: url(#goo); }
+  .goo .c { position: absolute; left: 50%; top: 50%; border-radius: 50%; will-change: transform; }
+  .c-core { width: 150px; height: 150px; margin: -75px 0 0 -75px;
+            background: radial-gradient(circle at 34% 30%, #4A7BD4 0%, #243F8F 52%, #101E4A 100%); }
+  .c1 { width: 92px; height: 92px; margin: -46px 0 0 -46px;
+        background: radial-gradient(circle at 36% 32%, #2FBFB4 0%, #0D6E6E 100%); }
+  .c2 { width: 72px; height: 72px; margin: -36px 0 0 -36px;
+        background: radial-gradient(circle at 36% 32%, #6D3FBF 0%, #31175E 100%); }
+  .c3 { width: 62px; height: 62px; margin: -31px 0 0 -31px;
+        background: radial-gradient(circle at 36% 32%, #3E63C2 0%, #14255A 100%); }
+  .c4 { width: 52px; height: 52px; margin: -26px 0 0 -26px;
+        background: radial-gradient(circle at 36% 32%, #1E8F8A 0%, #0A3A3A 100%); }
+  .blob-glow { position: absolute; left: 50%; top: 50%; width: 340px; height: 340px; margin: -170px 0 0 -170px;
+    border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle, rgba(63,99,194,.22) 0%, rgba(47,191,180,.1) 42%, transparent 68%); }
+
+  .wave-zone { display: none; align-items: center; justify-content: center; gap: 7px; height: 320px; }
+  .wave-zone .w { width: 5px; border-radius: 3px; background: linear-gradient(180deg, #8FD8FF, #4A7BD4); height: 14px; }
+  body[data-variant="wave"] .blob-zone { display: none; }
+  body[data-variant="wave"] .wave-zone { display: flex; }
+
+  .captions { min-height: 96px; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 560px; text-align: center; }
+  .cap { font-size: 15px; line-height: 1.85; animation: cap-in .5s ease both; display: flex; align-items: baseline; gap: 10px; }
+  .cap .dot { width: 5px; height: 5px; border-radius: 50%; flex: none; position: relative; top: -3px; }
+  .cap-user { color: rgba(230,237,247,.88); text-shadow: 0 1px 14px rgba(0,0,0,.5); }
+  .cap-user .dot { background: #8FB6FF; box-shadow: 0 0 8px rgba(143,182,255,.8); }
+  .cap-ai { color: rgba(196,240,226,.92); text-shadow: 0 1px 14px rgba(0,0,0,.5); }
+  .cap-ai .dot { background: #5EEAD4; box-shadow: 0 0 8px rgba(94,234,212,.8); }
+  @keyframes cap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .controls { display: flex; align-items: center; gap: 16px; height: 60px; }
+  .hangup { width: 56px; height: 56px; border-radius: 50%; cursor: pointer;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.14);
+    backdrop-filter: blur(10px); color: #FF6B61;
+    display: inline-flex; align-items: center; justify-content: center; transition: all .2s; }
+  .hangup:hover { border-color: rgba(255,107,97,.55); background: rgba(255,107,97,.08); box-shadow: 0 0 28px rgba(255,107,97,.18); }
+  .hangup:active { transform: scale(.94); }
+  .skip, .speak-toggle { border: none; background: none; cursor: pointer; color: rgba(230,237,247,.42);
+    font-size: 13px; letter-spacing: .06em; transition: color .3s, opacity .3s; }
+  .skip:hover, .speak-toggle:hover { color: rgba(230,237,247,.85); }
+  .skip.hidden { opacity: 0; pointer-events: none; }
+  .speak-toggle .st-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 7px;
+    position: relative; top: -2px; background: #5EEAD4; box-shadow: 0 0 8px rgba(94,234,212,.8); }
+  .speak-toggle.off .st-dot { background: rgba(148,163,184,.5); box-shadow: none; }
+
+  .switcher { position: fixed; top: 18px; right: 18px; z-index: 30; display: flex; gap: 6px; padding: 5px;
+    background: rgba(10,16,26,.55); border: 1px solid rgba(142,164,190,.16); border-radius: 10px; backdrop-filter: blur(12px); }
+  .switcher button { padding: 6px 14px; border-radius: 7px; border: none; cursor: pointer;
+    background: transparent; color: rgba(230,237,247,.5); font-size: 12.5px; }
+  .switcher button.on { background: rgba(94,234,212,.1); color: #5EEAD4; }
+  .switcher.mode { top: auto; bottom: 18px; right: 18px; }
+  .mode-note { position: fixed; bottom: 16px; left: 16px; z-index: 30; font-size: 11px; color: rgba(230,237,247,.3); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body data-state="listening" data-variant="blob">
+
+<svg width="0" height="0" style="position:absolute">
+  <filter id="goo">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur"/>
+    <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -11" result="goo"/>
+    <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+  </filter>
+</svg>
+
+<div class="fake" aria-hidden="true">
+  <div class="fake-col" style="width:220px;flex:none;">
+    <div class="fake-bar w50"></div><div class="fake-bar w70"></div><div class="fake-bar w40"></div>
+  </div>
+  <div class="fake-col">
+    <div class="fake-bar w40"></div><div class="fake-block"></div>
+    <div class="fake-bar w70"></div><div class="fake-bar w50"></div>
+  </div>
+</div>
+
+<div class="aurora" aria-hidden="true">
+  <div class="a a1"></div><div class="a a2"></div><div class="a a3"></div>
+</div>
+<div class="grain" aria-hidden="true"></div>
+
+<div class="stage">
+  <div class="topline" id="timer">00:00</div>
+  <div class="center">
+    <div class="blob-zone" id="blobZone">
+      <div class="blob-glow"></div>
+      <div class="goo">
+        <div class="c c-core" data-orbit="0" data-r="0" data-size="0"></div>
+        <div class="c c1" data-orbit="0.4" data-r="34" data-size="10"></div>
+        <div class="c c2" data-orbit="2.2" data-r="46" data-size="8"></div>
+        <div class="c c3" data-orbit="4.1" data-r="28" data-size="12"></div>
+        <div class="c c4" data-orbit="5.3" data-r="52" data-size="9"></div>
+      </div>
+    </div>
+    <div class="wave-zone" id="waveZone"></div>
+    <div class="state-word" id="stateWord">聆听中</div>
+  </div>
+  <div class="captions" id="captions">
+    <div class="cap cap-ai"><span class="dot"></span>已定位到连接池配置文件，把最大连接数从 10 调到 32，并补了超时归还逻辑。</div>
+    <div class="cap cap-user"><span class="dot"></span>改完之后会影响正在跑的定时任务吗？</div>
+  </div>
+  <div class="controls">
+    <button class="speak-toggle" id="speakToggle"><span class="st-dot"></span>自动播报</button>
+    <button class="hangup" title="结束语音对话（Esc）">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>
+      </svg>
+    </button>
+    <button class="skip hidden" id="skip">跳过播报</button>
+  </div>
+</div>
+
+<div class="switcher">
+  <button data-v="blob" class="on">流体</button>
+  <button data-v="wave">微光</button>
+</div>
+<div class="switcher mode">
+  <button data-m="listening" class="on">聆听</button>
+  <button data-m="thinking">思考</button>
+  <button data-m="speaking">播报</button>
+</div>
+<div class="mode-note">振幅为模拟数据（插件内由真实麦克风驱动）· 播报态可看「跳过」出现</div>
+
+<script>
+const state = { mode: 'listening', variant: 'blob', amp: .3, t: 0 }
+
+function targetAmp() {
+  if (state.mode === 'listening') {
+    const cluster = Math.pow(Math.abs(Math.sin(state.t * 1.9 + 1)), 2.2)
+    return .15 + .85 * cluster * (.6 + .4 * Math.sin(state.t * 13))
+  }
+  if (state.mode === 'thinking') return .12 + .06 * Math.sin(state.t * 1.2)
+  const pulse = Math.pow(Math.abs(Math.sin(state.t * 4.4)), 2)
+  return .3 + .7 * pulse
+}
+
+const circles = [...document.querySelectorAll('.goo .c')]
+function tickBlob() {
+  for (const el of circles) {
+    const orbit = parseFloat(el.dataset.orbit)
+    const r = parseFloat(el.dataset.r)
+    const sizeAmp = parseFloat(el.dataset.size)
+    if (r === 0) {
+      const s = 1 + state.amp * .16 + (state.mode === 'speaking' ? .06 * Math.sin(state.t * 7) : 0)
+      el.style.transform = `translate(-50%,-50%) scale(${s.toFixed(3)})`
+      continue
+    }
+    const speed = state.mode === 'speaking' ? 1.7 : state.mode === 'thinking' ? .4 : .9
+    const a = orbit + state.t * speed
+    const wobble = 1 + .3 * Math.sin(state.t * 1.3 + orbit * 2)
+    const x = Math.cos(a) * r * wobble
+    const y = Math.sin(a) * r * wobble
+    const s = 1 + state.amp * sizeAmp * .05
+    el.style.transform = `translate(calc(-50% + ${x.toFixed(1)}px), calc(-50% + ${y.toFixed(1)}px)) scale(${s.toFixed(3)})`
+  }
+}
+
+const waveZone = document.getElementById('waveZone')
+const BARS = 9
+for (let i = 0; i < BARS; i++) waveZone.appendChild(Object.assign(document.createElement('div'), { className: 'w' }))
+const bars = [...waveZone.children]
+function tickWave() {
+  bars.forEach((b, i) => {
+    const center = Math.abs(i - (BARS - 1) / 2) / ((BARS - 1) / 2)
+    const h = 10 + state.amp * 66 * (1.15 - center * .85) * (.5 + .5 * Math.abs(Math.sin(state.t * 9 + i)))
+    b.style.height = `${h.toFixed(1)}px`
+  })
+}
+
+function loop() {
+  state.t += 1 / 60
+  state.amp += (targetAmp() - state.amp) * .12
+  if (state.variant === 'blob') tickBlob(); else tickWave()
+  requestAnimationFrame(loop)
+}
+requestAnimationFrame(loop)
+
+const WORDS = { listening: '聆听中', thinking: '思考中', speaking: '播报中' }
+function setState(next) {
+  state.mode = next
+  document.body.dataset.state = next
+  document.getElementById('stateWord').textContent = WORDS[next]
+  document.getElementById('skip').classList.toggle('hidden', next !== 'speaking')
+  document.querySelectorAll('.switcher.mode button').forEach(b =>
+    b.classList.toggle('on', b.dataset.m === next))
+  if (next === 'speaking') pushCap('ai', '连接数调大后不会影响定时任务，归还逻辑保证空闲连接被及时回收，可以放心重启验证。')
+}
+document.querySelectorAll('.switcher.mode button').forEach(b =>
+  b.addEventListener('click', () => setState(b.dataset.m)))
+document.querySelectorAll('.switcher button[data-v]').forEach(b =>
+  b.addEventListener('click', () => {
+    state.variant = b.dataset.v
+    document.body.dataset.variant = b.dataset.v
+    document.querySelectorAll('.switcher button[data-v]').forEach(x =>
+      x.classList.toggle('on', x.dataset.v === b.dataset.v))
+  }))
+
+const captions = document.getElementById('captions')
+function pushCap(kind, text) {
+  const div = document.createElement('div')
+  div.className = `cap cap-${kind}`
+  div.innerHTML = `<span class="dot"></span>${text}`
+  captions.appendChild(div)
+  while (captions.children.length > 4) captions.firstChild.remove()
+}
+
+const timerEl = document.getElementById('timer')
+const start = Date.now()
+setInterval(() => {
+  const s = Math.floor((Date.now() - start) / 1000)
+  timerEl.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}, 1000)
+</script>
+</body>
+</html>

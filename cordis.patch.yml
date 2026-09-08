@@ -1,0 +1,8 @@
+# dsh-voice-talk bundle patch: inserts the dual-face plugin row into a web
+# profile's roster. The node half (exports ".") runs in the host process
+# (speak-protocol prompt section + the `voice` settings namespace); the
+# `dsh.client` declaration in package.json makes the browser half
+# (exports "./client", served at /plugins/<id>/client.js) load in the web GUI.
+- insert:
+    - id: voice-talk
+      name: dsh-voice-talk
