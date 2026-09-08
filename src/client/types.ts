@@ -20,8 +20,6 @@ export interface VoiceStatus {
   readonly pendingCount: number
   /** Last failure surfaced to the user (sticky until the next phase move). */
   readonly error: string | null
-  /** Auto-readout switch (mirrors the settings namespace, locally overridable). */
-  readonly autoSpeak: boolean
 }
 
 /** One transcript message in the call overlay's right-hand stream. */

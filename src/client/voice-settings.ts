@@ -5,7 +5,6 @@
 
 /** Resolved settings shape as served by the host schema. */
 export interface VoiceSettings {
-  autoSpeak?: boolean
   allowInterrupt?: boolean
   silenceTimeout?: number
   rate?: number
@@ -26,7 +25,6 @@ export interface VoiceSettings {
 
 /** Defaults matching the host schema, applied when a field is absent. */
 export const VOICE_DEFAULTS: Required<VoiceSettings> = {
-  autoSpeak: true,
   allowInterrupt: false,
   silenceTimeout: 1.2,
   rate: 1,
@@ -62,7 +60,6 @@ export function nearestRateLabel(rate: number): string {
 export function resolveSettings(section: VoiceSettings | undefined): Required<VoiceSettings> {
   const value = section ?? {}
   return {
-    autoSpeak: value.autoSpeak ?? VOICE_DEFAULTS.autoSpeak,
     allowInterrupt: value.allowInterrupt ?? VOICE_DEFAULTS.allowInterrupt,
     silenceTimeout: value.silenceTimeout ?? VOICE_DEFAULTS.silenceTimeout,
     rate: value.rate ?? VOICE_DEFAULTS.rate,

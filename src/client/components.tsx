@@ -30,8 +30,6 @@ export interface VoiceInjected {
   hangUp(): void
   /** Skip the current readout. */
   stopSpeaking(): void
-  /** Flip the auto-readout switch. */
-  setAutoSpeak(enabled: boolean): void
   /** Session-scope rate override (HUD writes; dies with the session). */
   setRateOverride(rate: number): void
   /** Session-scope speaker override (same lifecycle as the rate override). */
@@ -54,8 +52,6 @@ export interface VoiceSurfaceProps {
   hangUp(): void
   /** Skip the current readout. */
   stopSpeaking(): void
-  /** Flip the auto-readout switch. */
-  setAutoSpeak(enabled: boolean): void
   /** Session-scope rate override (HUD writes; dies with the session). */
   setRateOverride(rate: number): void
   /** Session-scope speaker override (same lifecycle as the rate override). */

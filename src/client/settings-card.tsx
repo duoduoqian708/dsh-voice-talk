@@ -110,7 +110,6 @@ function Field({ label, value, placeholder, disabled, onCommit }: {
 
 /** Internal field name → the Chinese label shown in reset chips. */
 const FIELD_LABELS: Record<string, string> = {
-  autoSpeak: '自动播报',
   allowInterrupt: '说话打断',
   silenceTimeout: '静音判定',
   maxReadoutChars: '字数上限',
@@ -496,8 +495,6 @@ export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: Voi
       <h3 className='dsh-voice-card-title'>语音对话</h3>
       <div className='dsh-voice-group'>
         <div className='dsh-voice-group-title'>基础设置</div>
-        <Toggle label='自动播报回复内容' on={value.autoSpeak} disabled={disabled}
-          onChange={next => { set('autoSpeak', next) }} />
         <Toggle label='说话打断播报' on={value.allowInterrupt} disabled={disabled}
           onChange={next => { set('allowInterrupt', next) }} />
         {value.allowInterrupt && (
@@ -527,7 +524,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: Voi
 
       {disabled ? null : (
         <div className='dsh-voice-card-overrides'>
-          {(['autoSpeak', 'allowInterrupt', 'silenceTimeout', 'maxReadoutChars'] as const)
+          {(['allowInterrupt', 'silenceTimeout', 'maxReadoutChars'] as const)
             .filter(field => override(field))
             .map(field => (
               <button key={field} type='button' className='dsh-voice-reset' onClick={clear(field)}>

@@ -20,8 +20,6 @@ export const VOICE_SETTINGS_NAMESPACE = settingsNamespace('voice')
 
 /** User configuration of the voice surfaces (read by the browser half). */
 export interface Config {
-  /** Auto-read each finalized reply's text prose. */
-  autoSpeak?: boolean
   /** Allow interrupting a readout by speaking (barge-in). */
   allowInterrupt?: boolean
   /** Silence length (seconds) that ends one utterance and submits the draft. */
@@ -51,7 +49,6 @@ export interface Config {
 export const Config: z<Config> = z.object({
   // Half-duplex by default: speaker playback feeds the microphone (echo) and
   // the ASR re-voices the readout back into the loop. Headphone users opt in.
-  autoSpeak: z.boolean().default(true),
   allowInterrupt: z.boolean().default(false),
   silenceTimeout: z.number().min(0.4).max(6).step(0.1).default(1.2),
   rate: z.number().min(0.5).max(2).step(0.1).default(1),

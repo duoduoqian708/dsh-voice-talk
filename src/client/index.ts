@@ -101,7 +101,6 @@ export function apply(ctx: ClientContext): void {
         toggleVoice: () => controller.stopVoice(),
         hangUp: () => controller.stopVoice(),
         stopSpeaking: () => controller.stopSpeaking(),
-        setAutoSpeak: enabled => controller.setAutoSpeak(enabled),
         setRateOverride: rate => controller.setSessionRate(rate),
         setVoiceOverride: voice => controller.setSessionSpeaker(voice),
         setField: (field, value) => {
@@ -120,11 +119,8 @@ export function apply(ctx: ClientContext): void {
     controllers.clear()
   }, 'voice-talk: controller registry')
 
-  // Auto-readout default follows the settings document.
-  settingsScope.subscribe(() => {
-    const enabled = resolveSettings(settingsNow()).autoSpeak
-    for (const controller of controllers.values()) controller.status.patch({ autoSpeak: enabled })
-  })
+  // Auto-readout is inherent to the loop (no toggle); the settings document
+  // no longer carries an autoSpeak field.
 
   // Esc hangs up any active voice session (keyboard-first exit).
   ctx.effect(() => {
@@ -154,7 +150,6 @@ export function apply(ctx: ClientContext): void {
         },
         hangUp: () => controller.stopVoice(),
         stopSpeaking: () => controller.stopSpeaking(),
-        setAutoSpeak: enabled => controller.setAutoSpeak(enabled),
         setRateOverride: rate => controller.setSessionRate(rate),
         setVoiceOverride: voice => controller.setSessionSpeaker(voice),
         setField: (field, value) => {

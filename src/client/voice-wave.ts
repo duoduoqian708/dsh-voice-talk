@@ -1,23 +1,43 @@
-// The ripple visual: concentric rings around the avatar breathing with the
-// live microphone amplitude while listening (AnalyserNode over a parallel
-// getUserMedia capture — Chrome allows it beside SpeechRecognition),
-// procedural motion for thinking/speaking. Transform/opacity only (GPU
-// composited, no layout work per frame), self-contained: the component only
-// mounts/unmounts it and feeds phase changes.
+// The call face's motion engine (v2 "Apple" direction). One class drives:
+//   - the waveform row: 19 round-capped ink bars, live mic RMS while
+//     listening, synth-pulse motion while speaking, near-still when
+//     thinking/idle (quiet = respect);
+//   - the two breath targets: the whale circle swells while SPEAKING, the
+//     hang-up key swells while LISTENING — "who speaks breathes";
+//   - their halos: a pre-rasterized blur ring behind each target whose
+//     opacity/scale rides the same signal (the "soft edge" bloom).
+// Breath is a two-layer signal: a 3.6s rest rhythm (alive even in silence)
+// plus a heavily smoothed amplitude (no jitter). Transform/opacity only.
+// Self-contained: the overlay mounts/unmounts it and feeds phase changes.
 
 import type { VoicePhase } from './types.ts'
 
 /** Grace period before the procedural fallback gives the mic another shot. */
 const MIC_RETRY_MS = 8_000
-const DEFAULT_RINGS = 3
+const BARS = 19
+/** Rest-breath period (seconds): close to a calm human breathing rhythm. */
+const BREATH_PERIOD_S = 3.6
+/** Amplitude smoothing factor per frame (heavy: no jitter, slow bloom). */
+const AMP_SMOOTH = 0.06
 
-export class VoiceRipple {
-  readonly #container: HTMLElement
-  readonly #rings: HTMLDivElement[] = []
+/** Breath targets and their halos (refs into the overlay DOM). */
+export interface BreathTargets {
+  whale: HTMLElement
+  key: HTMLElement
+  haloWhale: HTMLElement
+  haloKey: HTMLElement
+}
+
+export class CallBreath {
+  readonly #targets: BreathTargets
+  readonly #wave: HTMLElement
+  readonly #bars: HTMLDivElement[] = []
+  readonly #phaseOf: () => VoicePhase
   #phase: VoicePhase = 'idle'
   #raf: number | null = null
   #t = 0
   #amp = 0.3
+  #ampSlow = 0.3
   #audioCtx: AudioContext | null = null
   #analyser: AnalyserNode | null = null
   #stream: MediaStream | null = null
@@ -25,14 +45,16 @@ export class VoiceRipple {
   #micFailed = false
   #data: Uint8Array | null = null
 
-  constructor(container: HTMLElement, ringCount = DEFAULT_RINGS) {
-    this.#container = container
-    for (let i = ringCount - 1; i >= 0; i--) {
-      const ring = document.createElement('div')
-      ring.className = 'dsh-voice-ring'
-      ring.dataset.ring = String(i)
-      container.appendChild(ring)
-      this.#rings.push(ring)
+  constructor(targets: BreathTargets, waveContainer: HTMLElement, phaseOf: () => VoicePhase) {
+    this.#targets = targets
+    this.#wave = waveContainer
+    this.#phaseOf = phaseOf
+    this.#phase = phaseOf()
+    for (let i = 0; i < BARS; i++) {
+      const bar = document.createElement('div')
+      bar.className = 'dsh-voice-wave-bar'
+      waveContainer.appendChild(bar)
+      this.#bars.push(bar)
     }
   }
 
@@ -64,7 +86,7 @@ export class VoiceRipple {
     }
   }
 
-  /** Stop the parallel capture (keeps the rings alive procedurally). */
+  /** Stop the parallel capture (bars/breath keep moving procedurally). */
   releaseMic(): void {
     this.#stream?.getTracks().forEach(track => track.stop())
     this.#stream = null
@@ -91,8 +113,8 @@ export class VoiceRipple {
     if (this.#raf !== null) cancelAnimationFrame(this.#raf)
     this.#raf = null
     this.releaseMic()
-    for (const ring of this.#rings) ring.remove()
-    this.#rings.length = 0
+    for (const bar of this.#bars) bar.remove()
+    this.#bars.length = 0
   }
 
   /** Live microphone RMS, 0..1 (null while no analyser). */
@@ -110,44 +132,41 @@ export class VoiceRipple {
 
   #tick(): void {
     this.#t += 1 / 60
+    const phase = this.#phaseOf()
+    if (phase !== this.#phase) this.#phase = phase
     const live = this.#phase === 'listening' ? this.#liveAmp() : null
     const target = live ?? this.#proceduralAmp()
     this.#amp += (target - this.#amp) * (live !== null ? 0.35 : 0.12)
-    const n = this.#rings.length
-    for (let i = 0; i < n; i++) {
-      const depth = (n - 1 - Number(this.#rings[i]!.dataset.ring)) / Math.max(1, n - 1)
-      const scale = this.#ringScale(depth)
-      const opacity = this.#ringOpacity(depth)
-      this.#rings[i]!.style.transform = `scale(${scale.toFixed(3)})`
-      this.#rings[i]!.style.opacity = opacity.toFixed(3)
-    }
+    this.#ampSlow += (this.#amp - this.#ampSlow) * AMP_SMOOTH
+
+    this.#tickWave()
+    this.#tickBreath()
   }
 
-  /** Outer rings travel farther; phase scales the whole envelope. */
-  #ringScale(depth: number): number {
-    const wave = Math.sin(this.#t * 2.1 - depth * 1.9)
-    switch (this.#phase) {
-      case 'listening':
-        return 1 + depth * (0.10 + this.#amp * 0.55) * (0.72 + 0.28 * wave)
-      case 'thinking':
-        return 1 + depth * 0.16 * (0.7 + 0.3 * wave)
-      case 'speaking':
-        return 1 + depth * (0.16 + this.#amp * 0.6) * (0.75 + 0.25 * wave)
-      default:
-        return 1 + depth * 0.06
-    }
-  }
+  // ---- waveform row ---------------------------------------------------------
 
-  #ringOpacity(depth: number): number {
-    switch (this.#phase) {
-      case 'listening':
-        return 0.14 + this.#amp * 0.5 * (1 - depth * 0.55)
-      case 'thinking':
-        return 0.1 + 0.06 * Math.sin(this.#t * 1.2)
-      case 'speaking':
-        return 0.16 + this.#amp * 0.55 * (1 - depth * 0.55)
-      default:
-        return 0.08
+  #tickWave(): void {
+    const center = (BARS - 1) / 2
+    for (let i = 0; i < BARS; i++) {
+      const spread = Math.abs(i - center) / center
+      const jitter = 0.5 + 0.5 * Math.abs(Math.sin(this.#t * 9 + i * 1.7))
+      const shape = 1.18 - spread * 0.85
+      let heightPx: number
+      switch (this.#phase) {
+        case 'listening':
+          heightPx = 6 + this.#amp * 40 * shape * (0.55 + 0.45 * jitter)
+          break
+        case 'speaking':
+          heightPx = 8 + this.#amp * 44 * shape * (0.45 + 0.55 * jitter)
+          break
+        case 'thinking':
+          heightPx = 6 + this.#amp * 10 * shape
+          break
+        default:
+          heightPx = 5
+      }
+      // Base bar height is 6px; scaleY keeps the transform GPU-only.
+      this.#bars[i]!.style.transform = `scaleY(${(heightPx / 6).toFixed(3)})`
     }
   }
 
@@ -159,13 +178,43 @@ export class VoiceRipple {
         return 0.15 + 0.85 * cluster * (0.6 + 0.4 * Math.sin(this.#t * 13))
       }
       case 'thinking':
-        return 0.12 + 0.06 * Math.sin(this.#t * 1.2)
+        return 0.12 + 0.04 * Math.sin(this.#t * 1.1)
       case 'speaking': {
         const pulse = Math.pow(Math.abs(Math.sin(this.#t * 4.4)), 2)
         return 0.3 + 0.7 * pulse
       }
       default:
-        return 0.2
+        return 0.08
+    }
+  }
+
+  // ---- breath targets + halos ------------------------------------------------
+
+  /** Two-layer breath: rest rhythm + smoothed amplitude; peak ~11%. */
+  #breathDrive(): number {
+    const breath = 0.5 + 0.5 * Math.sin(this.#t * (Math.PI * 2) / BREATH_PERIOD_S - Math.PI / 2)
+    return breath * 0.035 + this.#ampSlow * 0.075
+  }
+
+  #tickBreath(): void {
+    const { whale, key, haloWhale, haloKey } = this.#targets
+    if (this.#phase === 'speaking') {
+      const drive = this.#breathDrive()
+      whale.style.transform = `scale(${(1 + drive).toFixed(4)})`
+      haloWhale.style.opacity = (0.2 + drive * 4.6).toFixed(3)
+      haloWhale.style.transform = `scale(${(1 + drive * 0.8).toFixed(4)})`
+    } else {
+      whale.style.transform = ''
+      haloWhale.style.opacity = '0'
+    }
+    if (this.#phase === 'listening') {
+      const drive = this.#breathDrive()
+      key.style.transform = `scale(${(1 + drive * 1.1).toFixed(4)})`
+      haloKey.style.opacity = (0.2 + drive * 4.8).toFixed(3)
+      haloKey.style.transform = `scale(${(1 + drive * 0.8).toFixed(4)})`
+    } else {
+      key.style.transform = ''
+      haloKey.style.opacity = '0'
     }
   }
 }

@@ -145,7 +145,7 @@ const SESSION_BASE_RATE = 1.0
 export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
-    pendingCount: 0, error: null, autoSpeak: true,
+    pendingCount: 0, error: null,
   })
 
   /** The session's message stream for the call overlay's right-hand column. */
@@ -179,7 +179,6 @@ export class VoiceController {
 
   constructor(deps: VoiceControllerDeps) {
     this.#deps = deps
-    this.status.patch({ autoSpeak: resolveSettings(deps.settings()).autoSpeak })
     // Transcript mirror (the overlay's right-hand stream) rides the same
     // snapshot subscription as the pending counter.
     this.#syncTranscript()
@@ -216,11 +215,6 @@ export class VoiceController {
   stopVoice(): void {
     this.#disarmAll()
     this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '' })
-  }
-
-  /** Toggle the auto-readout switch (a control inside the call overlay). */
-  setAutoSpeak(enabled: boolean): void {
-    this.status.patch({ autoSpeak: enabled })
   }
 
   /**
@@ -445,7 +439,7 @@ export class VoiceController {
   async #finishStream(finalText: string): Promise<void> {
     const settings = resolveSettings(this.#deps.settings())
     const session = this.#session
-    if (session === null || !this.status.getSnapshot().autoSpeak) {
+    if (session === null) {
       this.#finishRound()
       return
     }
@@ -483,7 +477,6 @@ export class VoiceController {
     this.#streamRaw = ''
     this.#streamFed = 0
     this.#session = null
-    if (!settings.autoSpeak) return
     const provider = this.#speaker()
     if (!provider.supported()) return
     const speaker = settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName
