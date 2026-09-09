@@ -40,15 +40,16 @@ export interface VoiceCardProps {
   credentials: VoiceCardInjected['credentials']
 }
 
-/** Credential refs per theme id (must match the host bridge's table). */
-const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: string }[]> = {
+/** Credential refs per theme id (must match the host bridge's table).
+ *  mask: false = display plain (APPID); true = show head****tail only. */
+const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: string; mask: boolean }[]> = {
   qwen: [
-    { ref: 'VOICE_QWEN_API_KEY', label: 'DashScope API Key' },
+    { ref: 'VOICE_QWEN_API_KEY', label: 'DashScope API Key', mask: true },
   ],
   xfyun: [
-    { ref: 'VOICE_XF_APP_ID', label: 'APPID' },
-    { ref: 'VOICE_XF_API_SECRET', label: 'API Secret' },
-    { ref: 'VOICE_XF_API_KEY', label: 'API Key' },
+    { ref: 'VOICE_XF_APP_ID', label: 'APPID', mask: false },
+    { ref: 'VOICE_XF_API_SECRET', label: 'API Secret', mask: true },
+    { ref: 'VOICE_XF_API_KEY', label: 'API Key', mask: true },
   ],
 }
 
@@ -114,12 +115,13 @@ function Field({ label, hint, value, placeholder, disabled, onCommit }: {
 }
 
 
-/** Mask a saved credential for on-page confirmation: APPID shows in
- *  full (not secret), keys show head/tail (the store never hands values back). */
-function maskRef(ref: string, value: string): string {
+/** Display a saved credential for on-page confirmation. Non-masked refs
+ *  (APPID) show the value in full; masked refs (secret/key) show only
+ *  head****tail — the store never hands values back for re-display. */
+function maskRef(mask: boolean, value: string): string {
   const v = value.trim()
-  if (v.length <= 8) return v
-  return ref.endsWith('_APP_ID') ? v : `${v.slice(0, 4)}···${v.slice(-4)}`
+  if (!mask || v.length <= 8) return v
+  return `${v.slice(0, 4)}****${v.slice(-4)}`
 }
 
 /** The sentence the try-listen buttons read. */
@@ -313,15 +315,15 @@ function ProviderModal({
     return () => { alive = false }
   }, [credentials, refs])
 
-  /** Auto-save one credential on blur; on success show its masked value. */
-  const saveCred = (ref: string): void => {
+  /** Auto-save one credential on blur; on success show its value (plain or masked). */
+  const saveCred = (ref: string, mask: boolean): void => {
     const text = draft[ref]?.trim() ?? ''
     if (text === '') return
     setMessage(null)
     void credentials.set({ ref, value: text }).then(res => {
       if (res.result.ok) {
         setCredState(c => ({ ...c, [ref]: true }))
-        setSavedPreview(p => ({ ...p, [ref]: maskRef(ref, text) }))
+        setSavedPreview(p => ({ ...p, [ref]: maskRef(mask, text) }))
         setMessage('已保存')
         onRefresh()
       } else {
@@ -384,22 +386,24 @@ function ProviderModal({
         </p>
       )}
       {(refs.length > 0 || fields.length > 0) && <div className='dsh-voice-modal-divider'>服务配置</div>}
-        {refs.map(({ ref, label }) => (
+        {refs.map(({ ref, label, mask }) => (
           <label key={ref} className='dsh-voice-row'>
             <span className='dsh-voice-row-label'>{label}</span>
             <span className='dsh-voice-cred-cell'>
               <input
                 className='dsh-voice-input dsh-voice-input-wide'
-                type='password'
-                placeholder={credState[ref] === true ? '••••••••' : '粘贴密钥'}
+                type={mask ? 'password' : 'text'}
+                placeholder={credState[ref] === true
+                  ? (mask ? '••••••••' : '已保存')
+                  : (mask ? '粘贴密钥' : '输入 APPID')}
                 value={draft[ref] ?? ''}
                 onChange={event => setDraft(d => ({ ...d, [ref]: event.target.value }))}
-                onBlur={() => saveCred(ref)}
+                onBlur={() => saveCred(ref, mask)}
                 onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
               />
               {savedPreview[ref] !== undefined
                 ? <span className='dsh-voice-cred-badge'>{savedPreview[ref]}</span>
-                : credState[ref] === true && <span className='dsh-voice-cred-badge'>已配置</span>}
+                : credState[ref] === true && <span className='dsh-voice-cred-badge'>{mask ? '已配置' : '已保存'}</span>}
             </span>
           </label>
         ))}
