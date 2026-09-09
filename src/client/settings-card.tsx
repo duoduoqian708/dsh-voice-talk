@@ -64,10 +64,13 @@ const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string
 }
 
 /** Toggle row: a plain CSS dot slider (platform-style switch). */
-function Toggle({ label, on, disabled, onChange }: { label: string; on: boolean; disabled?: boolean; onChange(next: boolean): void }): ReactElement {
+function Toggle({ label, hint, on, disabled, onChange }: { label: string; hint?: string; on: boolean; disabled?: boolean; onChange(next: boolean): void }): ReactElement {
   return (
     <label className='dsh-voice-row'>
-      <span className='dsh-voice-row-label'>{label}</span>
+      <span className='dsh-voice-row-left'>
+        <span className='dsh-voice-row-label'>{label}</span>
+        {hint !== undefined && hint !== '' && <span className='dsh-voice-row-hint'>{hint}</span>}
+      </span>
       <button
         type='button'
         role='switch'
@@ -517,12 +520,10 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
       <div className='dsh-voice-panel'>
         <div className='dsh-voice-panel-sec'>
           <div className='dsh-voice-panel-title'>基础设置</div>
-          <Toggle label='说话打断播报' on={value.allowInterrupt} disabled={disabled}
+          <Toggle label='说话打断播报' hint={value.allowInterrupt ? '说话即可打断播报，播报回音自动滤除' : undefined}
+            on={value.allowInterrupt} disabled={disabled}
             onChange={next => { set('allowInterrupt', next) }} />
-          {value.allowInterrupt && (
-            <p className='dsh-voice-card-warn'>外放可用，播报回声会自动过滤；回声过大导致误识别时，戴耳机体验更稳。</p>
-          )}
-          <Field label='静音判定秒数' value={String(value.silenceTimeout)} placeholder='0.4–6' disabled={disabled}
+          <Field label='停顿多久自动发送（秒）' value={String(value.silenceTimeout)} placeholder='默认 1.2' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
           <Field label='播报字数上限' value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
