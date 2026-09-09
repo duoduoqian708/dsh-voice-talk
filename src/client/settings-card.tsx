@@ -24,7 +24,6 @@ export interface VoiceCardInjected {
     voiceCard: { getSnapshot(): VoiceCardState; subscribe(listener: () => void): () => void }
   }
   set(field: string, value: unknown): void
-  unset(field: string): void
   /** Credential read/write for the theme setup guides (keys stay host-side). */
   credentials: {
     describe(payload: { refs: string[] }): Promise<{ result: { ok: boolean; value?: { credentials: Record<string, { configured: boolean }> } } }>
@@ -37,7 +36,6 @@ export interface VoiceCardProps {
   /** Selector hook over the card snapshot (framework-bound from hooks.voiceCard). */
   useVoiceCard: <S>(selector: (snapshot: VoiceCardState) => S, eq?: (a: S, b: S) => boolean) => S
   set(field: string, value: unknown): void
-  unset(field: string): void
   /** Credential read/write (framework share from the inject face). */
   credentials: VoiceCardInjected['credentials']
 }
@@ -108,15 +106,6 @@ function Field({ label, value, placeholder, disabled, onCommit }: {
   )
 }
 
-/** Internal field name → the Chinese label shown in reset chips. */
-const FIELD_LABELS: Record<string, string> = {
-  allowInterrupt: '说话打断',
-  silenceTimeout: '静音判定',
-  maxReadoutChars: '字数上限',
-  rate: '语速',
-  voiceLang: '语言',
-  voiceName: '说话人',
-}
 
 /** The sentence the try-listen buttons read. */
 const TRY_TEXT = '你好，我是你的语音助手，很高兴为你朗读内容。'
@@ -483,14 +472,11 @@ function renderSpeakerOptions(speakers: ReturnType<typeof speakersForTheme>): Re
 }
 
 /** Render the voice settings card. */
-export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: VoiceCardProps): ReactElement {
+export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardProps): ReactElement {
   const status = useVoiceCard(s => s.status)
   const value = useVoiceCard(s => s.value)
-  const user = useVoiceCard(s => s.user)
   const writable = useVoiceCard(s => s.writable)
   const disabled = !writable
-  const override = (field: string): boolean => Object.prototype.hasOwnProperty.call(user, field)
-  const clear = (field: string): (() => void) | undefined => override(field) && !disabled ? () => unset(field) : undefined
 
   // The system-theme speaker picker needs the platform roster, which arrives
   // asynchronously in Chrome (voiceschanged); re-read it until non-empty.
@@ -562,17 +548,6 @@ export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: Voi
         </div>
       </div>
 
-      {disabled ? null : (
-        <div className='dsh-voice-card-overrides'>
-          {(['allowInterrupt', 'silenceTimeout', 'maxReadoutChars'] as const)
-            .filter(field => override(field))
-            .map(field => (
-              <button key={field} type='button' className='dsh-voice-reset' onClick={clear(field)}>
-                重置{FIELD_LABELS[field] ?? field}
-              </button>
-            ))}
-        </div>
-      )}
     </div>
   )
 }

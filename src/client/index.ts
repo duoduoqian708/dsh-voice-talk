@@ -189,7 +189,6 @@ export function apply(ctx: ClientContext): void {
     inject: (): VoiceCardInjected => ({
       hooks: { voiceCard: cardStore },
       set: (field, value) => { void settingsScope.set(field, value).catch(error => console.error('[dsh-voice-talk] settings write failed:', error)) },
-      unset: field => { void settingsScope.unset(field).catch(error => console.error('[dsh-voice-talk] settings clear failed:', error)) },
       credentials: api.credentials,
     }),
   }, VoiceSettingsCard))

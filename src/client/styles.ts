@@ -53,11 +53,6 @@ const CSS = `
 .dsh-voice-input:focus { outline: none; border-color: #007AFF; }
 .dsh-voice-card-warn { margin: 0; font-size: 11px; color: #B25000; }
 .dsh-voice-card-hint { margin: 0; color: #86868B; font-size: 11px; }
-.dsh-voice-card-overrides { display: flex; flex-wrap: wrap; gap: 6px; }
-.dsh-voice-reset {
-  border: none; border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer;
-  background: color-mix(in srgb, currentColor 10%, transparent); color: inherit;
-}
 
 /* ---- settings card: engine setup guide ---- */
 .dsh-voice-setup { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(0, 0, 0, .03); }
