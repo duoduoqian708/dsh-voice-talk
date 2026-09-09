@@ -67,30 +67,31 @@ const CSS = `
 .dsh-voice-setup-ok { font-size: 11px; color: #34C759; margin-left: 6px; }
 .dsh-voice-setup-actions { display: flex; align-items: center; gap: 10px; }
 
-/* ---- settings card: provider cards ---- */
-.dsh-voice-providers { display: grid; gap: 10px; }
-.dsh-voice-group {
-  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
+/* ---- settings card: one unified panel (基础设置 + 音色引擎, not separate boxes) ---- */
+.dsh-voice-panel {
+  display: flex; flex-direction: column;
   border: 1px solid rgba(0, 0, 0, .08);
+  border-radius: 16px;
   background: #fff;
+  overflow: hidden;
 }
-.dsh-voice-group-title { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #6E6E73; }
-.dsh-voice-provider {
-  display: grid; gap: 8px; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, .08);
-  background: #fff;
-  transition: border-color .15s, box-shadow .15s;
+.dsh-voice-panel-sec { display: grid; gap: 8px; padding: 14px 16px; }
+.dsh-voice-panel-title { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: #6E6E73; }
+.dsh-voice-panel-sep { height: 1px; background: rgba(0, 0, 0, .06); }
+/* engines laid out as compact rows inside the panel (no per-engine boxes) */
+.dsh-voice-engine-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 2px;
 }
-.dsh-voice-provider.is-active {
-  border-color: rgba(0, 122, 255, .55);
-  box-shadow: 0 0 0 1px rgba(0, 122, 255, .25) inset;
-}
-.dsh-voice-provider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.dsh-voice-provider-name { font-size: 13px; font-weight: 600; }
-.dsh-voice-provider-status { font-size: 11px; color: #86868B; }
-.dsh-voice-provider-status.is-missing { color: #B25000; }
-.dsh-voice-provider-note { margin: 0; font-size: 11px; color: #86868B; line-height: 1.6; }
-.dsh-voice-provider-actions { display: flex; align-items: center; gap: 8px; }
+.dsh-voice-engine-row + .dsh-voice-engine-row { border-top: 1px solid rgba(0, 0, 0, .06); }
+.dsh-voice-engine-info { display: grid; gap: 3px; min-width: 0; }
+.dsh-voice-engine-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.dsh-voice-engine-name { font-size: 13px; font-weight: 600; }
+.dsh-voice-engine-name.is-active { color: #007AFF; }
+.dsh-voice-engine-status { font-size: 11px; color: #86868B; white-space: nowrap; }
+.dsh-voice-engine-status.is-missing { color: #B25000; }
+.dsh-voice-engine-note { margin: 0; font-size: 11px; color: #86868B; line-height: 1.5; }
+.dsh-voice-provider-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .dsh-voice-provider-btn {
   border: none; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer;
   background: rgba(0, 0, 0, .06); color: #1D1D1F;
@@ -150,14 +151,16 @@ const CSS = `
 /* host dark theme: adapt card surfaces (the presenter sets the attribute) */
 body[data-ds-dark-theme] .dsh-voice-card,
 body[data-ds-dark-theme] .dsh-voice-modal { color: #E6EDF7; }
-body[data-ds-dark-theme] .dsh-voice-group,
-body[data-ds-dark-theme] .dsh-voice-provider,
-body[data-ds-dark-theme] .dsh-voice-setup { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
-body[data-ds-dark-theme] .dsh-voice-group-title,
-body[data-ds-dark-theme] .dsh-voice-provider-note,
-body[data-ds-dark-theme] .dsh-voice-provider-status,
+body[data-ds-dark-theme] .dsh-voice-panel,
+body[data-ds-dark-theme] .dsh-voice-setup { background: #1C2230; border-color: rgba(255, 255, 255, .1); }
+body[data-ds-dark-theme] .dsh-voice-panel-sep,
+body[data-ds-dark-theme] .dsh-voice-engine-row + .dsh-voice-engine-row { border-color: rgba(255, 255, 255, .08); }
+body[data-ds-dark-theme] .dsh-voice-panel-title,
+body[data-ds-dark-theme] .dsh-voice-engine-note,
+body[data-ds-dark-theme] .dsh-voice-engine-status,
 body[data-ds-dark-theme] .dsh-voice-modal-hint,
 body[data-ds-dark-theme] .dsh-voice-card-hint { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-engine-name.is-active { color: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-provider-btn { background: rgba(255, 255, 255, .08); color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-provider-btn:hover { background: rgba(255, 255, 255, .14); }
 body[data-ds-dark-theme] .dsh-voice-provider-btn.is-primary { background: #007AFF; color: #fff; }

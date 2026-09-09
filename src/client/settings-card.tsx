@@ -120,6 +120,14 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** The sentence the try-listen buttons read. */
 const TRY_TEXT = '你好，我是你的语音助手，很高兴为你朗读内容。'
+
+/** Fixed empty refs list (module constant — a per-render `?? []` churned identity). */
+const EMPTY_REFS: readonly { ref: string; label: string }[] = []
+
+/** Session cache of per-theme credential-configured state: cuts repeat
+ *  describe() IPC when the settings page is revisited while state is stable.
+ *  Cleared by the save flow (onRefresh) so a fresh check follows a write. */
+const configuredCache = new Map<string, boolean>()
 /** Try-listen always reads at the default rate; live speed lives on the HUD. */
 const TRY_RATE = 1.0
 
@@ -177,32 +185,43 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
   return {}
 }
 
-/** One provider card: status line + 启用/试听/设置 buttons. */
-function ProviderCard({
-  theme, value, credentials, set, onActivate, onRefresh,
+/** One engine row inside the unified panel: name + status + actions. */
+function EngineRow({
+  theme, value, credentials, set, refreshKey, onActivate, onRefresh,
 }: {
   theme: VoiceTheme
   value: Required<VoiceSettings>
   credentials: VoiceCardProps['credentials']
   set(field: string, value: unknown): void
+  /** Bumped after a save so the credential check re-runs (cache invalidated). */
+  refreshKey: number
   onActivate(): void
   onRefresh(): void
 }): ReactElement {
-  const refs = THEME_CREDENTIAL_REFS[theme.id]
-  const needsSetup = theme.needsSetup === true && refs !== undefined
+  const refs = THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
+  const needsSetup = theme.needsSetup === true && refs.length > 0
   const [configured, setConfigured] = useState<boolean | null>(needsSetup ? null : true)
   const [modalOpen, setModalOpen] = useState(false)
 
   useEffect(() => {
-    if (!needsSetup || refs === undefined) return
+    if (!needsSetup) return
+    // Serve from the session cache — a settings-page revisit must not refire
+    // describe() IPC while the credential state is unchanged.
+    const cached = configuredCache.get(theme.id)
+    if (cached !== undefined) {
+      setConfigured(cached)
+      return
+    }
     let alive = true
     void credentials.describe({ refs: refs.map(r => r.ref) }).then(response => {
       if (!alive || !response.result.ok) return
       const list = response.result.value?.credentials ?? {}
-      setConfigured(refs.every(r => list[r.ref]?.configured === true))
+      const ok = refs.every(r => list[r.ref]?.configured === true)
+      configuredCache.set(theme.id, ok)
+      if (alive) setConfigured(ok)
     }).catch(() => { if (alive) setConfigured(false) })
     return () => { alive = false }
-  }, [credentials, needsSetup, refs])
+  }, [credentials, needsSetup, refs, theme.id, refreshKey])
 
   const active = value.ttsTheme === theme.id
   const statusWord = !needsSetup
@@ -212,12 +231,14 @@ function ProviderCard({
         : '凭证未配置'
 
   return (
-    <div className={`dsh-voice-provider${active ? ' is-active' : ''}`}>
-      <div className='dsh-voice-provider-head'>
-        <span className='dsh-voice-provider-name'>{theme.label}</span>
-        <span className={`dsh-voice-provider-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
+    <div className='dsh-voice-engine-row'>
+      <div className='dsh-voice-engine-info'>
+        <div className='dsh-voice-engine-line'>
+          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{theme.label}</span>
+          <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
+        </div>
+        {theme.note !== undefined && <p className='dsh-voice-engine-note'>{theme.note}</p>}
       </div>
-      {theme.note !== undefined && <p className='dsh-voice-provider-note'>{theme.note}</p>}
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
           onClick={onActivate}>
@@ -258,7 +279,7 @@ function ProviderModal({
   onRefresh(): void
   onClose(): void
 }): ReactElement {
-  const refs = THEME_CREDENTIAL_REFS[theme.id] ?? []
+  const refs = THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
   const fields = THEME_MODAL_FIELDS[theme.id] ?? []
   const speakers = speakersForTheme(theme.id, value.voiceLang)
   const savedSpeaker = value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? ''
@@ -473,11 +494,25 @@ export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: Voi
 
   // The system-theme speaker picker needs the platform roster, which arrives
   // asynchronously in Chrome (voiceschanged); re-read it until non-empty.
-  const [, tickVoices] = useState(0)
+  const [voicesTick, tickVoices] = useState(0)
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
     if (window.speechSynthesis.getVoices().length > 0) return
-    const onChange = (): void => tickVoices(n => n + 1)
+    // Chrome can fire voiceschanged in bursts as voices load; throttle the
+    // re-renders and stop after a few attempts so a quiet roster doesn't
+    // re-render the whole card on a loop.
+    let attempts = 0
+    let lastAt = 0
+    const onChange = (): void => {
+      const now = Date.now()
+      if (now - lastAt < 250) return
+      lastAt = now
+      if (++attempts > 8) {
+        window.speechSynthesis.removeEventListener('voiceschanged', onChange)
+        return
+      }
+      tickVoices(n => n + 1)
+    }
     window.speechSynthesis.addEventListener('voiceschanged', onChange)
     return () => window.speechSynthesis.removeEventListener('voiceschanged', onChange)
   }, [])
@@ -493,33 +528,38 @@ export function VoiceSettingsCard({ useVoiceCard, set, unset, credentials }: Voi
   return (
     <div className='dsh-voice-card'>
       <h3 className='dsh-voice-card-title'>语音对话</h3>
-      <div className='dsh-voice-group'>
-        <div className='dsh-voice-group-title'>基础设置</div>
-        <Toggle label='说话打断播报' on={value.allowInterrupt} disabled={disabled}
-          onChange={next => { set('allowInterrupt', next) }} />
-        {value.allowInterrupt && (
-          <p className='dsh-voice-card-warn'>外放时播报声音会被麦克风回收录入，建议仅在戴耳机时开启。</p>
-        )}
-        <Field label='静音判定秒数' value={String(value.silenceTimeout)} placeholder='0.4–6' disabled={disabled}
-          onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
-        <Field label='播报字数上限' value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
-          onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
-        <p className='dsh-voice-card-hint'>播报内容：自动剔除代码；思考与工具过程不播报</p>
-      </div>
+      <div className='dsh-voice-panel'>
+        <div className='dsh-voice-panel-sec'>
+          <div className='dsh-voice-panel-title'>基础设置</div>
+          <Toggle label='说话打断播报' on={value.allowInterrupt} disabled={disabled}
+            onChange={next => { set('allowInterrupt', next) }} />
+          {value.allowInterrupt && (
+            <p className='dsh-voice-card-warn'>外放时播报声音会被麦克风回收录入，建议仅在戴耳机时开启。</p>
+          )}
+          <Field label='静音判定秒数' value={String(value.silenceTimeout)} placeholder='0.4–6' disabled={disabled}
+            onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
+          <Field label='播报字数上限' value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
+            onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
+          <p className='dsh-voice-card-hint'>播报内容：自动剔除代码；思考与工具过程不播报</p>
+        </div>
 
-      <div className='dsh-voice-group-title'>音色引擎</div>
-      <div className='dsh-voice-providers'>
-        {listVoiceThemes().map(theme => (
-          <ProviderCard
-            key={theme.id}
-            theme={theme}
-            value={value}
-            credentials={credentials}
-            set={set}
-            onActivate={() => { if (!disabled) set('ttsTheme', theme.id) }}
-            onRefresh={() => tickVoices(n => n + 1)}
-          />
-        ))}
+        <div className='dsh-voice-panel-sep' aria-hidden='true' />
+
+        <div className='dsh-voice-panel-sec'>
+          <div className='dsh-voice-panel-title'>音色引擎</div>
+          {listVoiceThemes().map(theme => (
+            <EngineRow
+              key={theme.id}
+              theme={theme}
+              value={value}
+              credentials={credentials}
+              set={set}
+              refreshKey={voicesTick}
+              onActivate={() => { if (!disabled) set('ttsTheme', theme.id) }}
+              onRefresh={() => { configuredCache.clear(); tickVoices(n => n + 1) }}
+            />
+          ))}
+        </div>
       </div>
 
       {disabled ? null : (
