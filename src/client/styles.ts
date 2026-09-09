@@ -31,6 +31,8 @@ const CSS = `
 .dsh-voice-card-empty { margin: 0; opacity: .6; font-size: 12px; }
 .dsh-voice-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
 .dsh-voice-row-label { opacity: .85; }
+.dsh-voice-row-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.dsh-voice-row-hint { font-size: 11px; color: #86868B; }
 .dsh-voice-row-value { font-size: 13px; opacity: .7; }
 .dsh-voice-switch {
   width: 40px; height: 22px; padding: 0; border-radius: 999px; border: none;
@@ -154,7 +156,8 @@ body[data-ds-dark-theme] .dsh-voice-panel-title,
 body[data-ds-dark-theme] .dsh-voice-engine-note,
 body[data-ds-dark-theme] .dsh-voice-engine-status,
 body[data-ds-dark-theme] .dsh-voice-modal-hint,
-body[data-ds-dark-theme] .dsh-voice-card-hint { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-card-hint,
+body[data-ds-dark-theme] .dsh-voice-row-hint { color: rgba(230, 237, 247, .55); }
 body[data-ds-dark-theme] .dsh-voice-engine-name.is-active { color: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-provider-btn { background: rgba(255, 255, 255, .08); color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-provider-btn:hover { background: rgba(255, 255, 255, .14); }
