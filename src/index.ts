@@ -50,7 +50,7 @@ export const Config: z<Config> = z.object({
   // Half-duplex by default: speaker playback feeds the microphone (echo) and
   // the ASR re-voices the readout back into the loop. Headphone users opt in.
   allowInterrupt: z.boolean().default(false),
-  silenceTimeout: z.number().min(0.4).max(6).step(0.1).default(1.2),
+  silenceTimeout: z.number().min(0.4).max(6).step(0.1).default(2),
   rate: z.number().min(0.5).max(2).step(0.1).default(1),
   voiceLang: z.string().default('zh-CN'),
   voiceName: z.string().default(''),

@@ -86,8 +86,9 @@ function Toggle({ label, hint, on, disabled, onChange }: { label: string; hint?:
 }
 
 /** Number/text row with an inline apply-on-blur write. */
-function Field({ label, value, placeholder, disabled, onCommit }: {
+function Field({ label, hint, value, placeholder, disabled, onCommit }: {
   label: string
+  hint?: string
   value: string
   placeholder?: string
   disabled?: boolean
@@ -95,7 +96,10 @@ function Field({ label, value, placeholder, disabled, onCommit }: {
 }): ReactElement {
   return (
     <label className='dsh-voice-row'>
-      <span className='dsh-voice-row-label'>{label}</span>
+      <span className='dsh-voice-row-left'>
+        <span className='dsh-voice-row-label'>{label}</span>
+        {hint !== undefined && hint !== '' && <span className='dsh-voice-row-hint'>{hint}</span>}
+      </span>
       <input
         className='dsh-voice-input'
         defaultValue={value}
@@ -523,11 +527,11 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
           <Toggle label='说话打断播报' hint={value.allowInterrupt ? '说话即可打断播报，播报回音自动滤除' : undefined}
             on={value.allowInterrupt} disabled={disabled}
             onChange={next => { set('allowInterrupt', next) }} />
-          <Field label='停顿多久自动发送（秒）' value={String(value.silenceTimeout)} placeholder='默认 1.2' disabled={disabled}
+          <Field label='停顿多久自动发送（秒）' value={String(value.silenceTimeout)} placeholder='默认 2' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
-          <Field label='播报字数上限' value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
+          <Field label='播报字数上限' hint={value.maxReadoutChars === 0 ? '0 = 不限；播报自动剔除推理与代码' : '播报自动剔除推理与代码'}
+            value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
-          <p className='dsh-voice-card-hint'>播报内容：自动剔除代码；思考与工具过程不播报</p>
         </div>
 
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
