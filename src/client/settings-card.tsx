@@ -520,7 +520,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
           <Toggle label='说话打断播报' on={value.allowInterrupt} disabled={disabled}
             onChange={next => { set('allowInterrupt', next) }} />
           {value.allowInterrupt && (
-            <p className='dsh-voice-card-warn'>外放时播报声音会被麦克风回收录入，建议仅在戴耳机时开启。</p>
+            <p className='dsh-voice-card-warn'>外放可用，播报回声会自动过滤；回声过大导致误识别时，戴耳机体验更稳。</p>
           )}
           <Field label='静音判定秒数' value={String(value.silenceTimeout)} placeholder='0.4–6' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
