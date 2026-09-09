@@ -47,8 +47,8 @@ const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: strin
   ],
   xfyun: [
     { ref: 'VOICE_XF_APP_ID', label: 'APPID' },
-    { ref: 'VOICE_XF_API_KEY', label: 'API Key' },
     { ref: 'VOICE_XF_API_SECRET', label: 'API Secret' },
+    { ref: 'VOICE_XF_API_KEY', label: 'API Key' },
   ],
 }
 
@@ -113,6 +113,14 @@ function Field({ label, hint, value, placeholder, disabled, onCommit }: {
   )
 }
 
+
+/** Mask a saved credential for on-page confirmation: APPID shows in
+ *  full (not secret), keys show head/tail (the store never hands values back). */
+function maskRef(ref: string, value: string): string {
+  const v = value.trim()
+  if (v.length <= 8) return v
+  return ref.endsWith('_APP_ID') ? v : `${v.slice(0, 4)}···${v.slice(-4)}`
+}
 
 /** The sentence the try-listen buttons read. */
 const TRY_TEXT = '你好，我是你的语音助手，很高兴为你朗读内容。'
@@ -264,7 +272,10 @@ function EngineRow({
   )
 }
 
-/** The per-provider settings modal: credentials + fields + try-listen area. */
+/** The per-provider settings modal: credentials + fields + try-listen area.
+ *  Filling a credential saves it on blur (no manual 保存): the page then shows
+ *  the saved APPID in full and head/tail of the two keys, since the credential
+ *  store only ever reports "configured" — never the value back. */
 function ProviderModal({
   theme, value, credentials, set, onRefresh, onClose,
 }: {
@@ -281,12 +292,13 @@ function ProviderModal({
   const savedSpeaker = value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? ''
   const [credState, setCredState] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Record<string, string>>({})
+  /** Masked preview of values saved THIS session (head/tail of keys). */
+  const [savedPreview, setSavedPreview] = useState<Record<string, string>>({})
   const [fieldDraft, setFieldDraft] = useState<Record<string, string>>(
     Object.fromEntries(fields.map(f => [f.field, String(value[f.field as keyof Required<VoiceSettings>] ?? '')])),
   )
   const [speakerDraft, setSpeakerDraft] = useState(savedSpeaker)
   const [promptDraft, setPromptDraft] = useState(TRY_TEXT)
-  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const speakerChanged = speakerDraft !== savedSpeaker
 
@@ -301,35 +313,32 @@ function ProviderModal({
     return () => { alive = false }
   }, [credentials, refs])
 
-  const save = (): void => {
-    setSaving(true)
+  /** Auto-save one credential on blur; on success show its masked value. */
+  const saveCred = (ref: string): void => {
+    const text = draft[ref]?.trim() ?? ''
+    if (text === '') return
     setMessage(null)
-    const writes: Promise<unknown>[] = []
-    for (const r of refs) {
-      const text = draft[r.ref]?.trim() ?? ''
-      if (text !== '') writes.push(credentials.set({ ref: r.ref, value: text }).then(x => x.result.ok))
-    }
-    for (const f of fields) {
-      const next = fieldDraft[f.field] ?? ''
-      if (next !== '' && next !== String(value[f.field as keyof Required<VoiceSettings>] ?? '')) {
-        set(f.field, next)
-        writes.push(Promise.resolve(true))
+    void credentials.set({ ref, value: text }).then(res => {
+      if (res.result.ok) {
+        setCredState(c => ({ ...c, [ref]: true }))
+        setSavedPreview(p => ({ ...p, [ref]: maskRef(ref, text) }))
+        setMessage('已保存')
+        onRefresh()
+      } else {
+        setMessage('保存失败，请重试')
       }
-    }
-    const speakerChangedLocal = speakerDraft !== savedSpeaker
-    if (speakerChangedLocal) {
-      set('speakerByTheme', { ...value.speakerByTheme, [theme.id]: speakerDraft })
-      writes.push(Promise.resolve(true))
-    }
-    void Promise.all(writes).then(results => {
-      setSaving(false)
-      setDraft({})
+    }).catch(() => setMessage('保存失败，请重试'))
+  }
+
+  /** Auto-save a model/endpoint field on blur when it actually changed. */
+  const saveField = (field: string): void => {
+    const next = (fieldDraft[field] ?? '').trim()
+    const prev = String(value[field as keyof Required<VoiceSettings>] ?? '')
+    if (next !== '' && next !== prev) {
+      set(field, next)
+      setMessage('已保存')
       onRefresh()
-      setMessage(results.every(ok => ok === true) ? '已保存' : '保存失败，请重试')
-    }).catch(() => {
-      setSaving(false)
-      setMessage('保存失败，请重试')
-    })
+    }
   }
 
   const tryIt = (): void => {
@@ -385,8 +394,12 @@ function ProviderModal({
                 placeholder={credState[ref] === true ? '••••••••' : '粘贴密钥'}
                 value={draft[ref] ?? ''}
                 onChange={event => setDraft(d => ({ ...d, [ref]: event.target.value }))}
+                onBlur={() => saveCred(ref)}
+                onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
               />
-              {credState[ref] === true && <span className='dsh-voice-cred-badge'>已配置</span>}
+              {savedPreview[ref] !== undefined
+                ? <span className='dsh-voice-cred-badge'>{savedPreview[ref]}</span>
+                : credState[ref] === true && <span className='dsh-voice-cred-badge'>已配置</span>}
             </span>
           </label>
         ))}
@@ -400,6 +413,8 @@ function ProviderModal({
               className='dsh-voice-input dsh-voice-input-wide'
               value={fieldDraft[field] ?? ''}
               onChange={event => setFieldDraft(d => ({ ...d, [field]: event.target.value }))}
+              onBlur={() => saveField(field)}
+              onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
             />
           </label>
         ))}
@@ -417,7 +432,7 @@ function ProviderModal({
             <button
               type='button'
               className='dsh-voice-provider-btn'
-              disabled={!speakerChanged || saving}
+              disabled={!speakerChanged}
               onClick={() => {
                 set('speakerByTheme', { ...value.speakerByTheme, [theme.id]: speakerDraft })
                 onRefresh()
@@ -437,13 +452,10 @@ function ProviderModal({
           />
         </label>
         <div className='dsh-voice-provider-actions'>
-          <button type='button' className='dsh-voice-provider-btn' onClick={tryIt}>试听</button>
+          <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
         </div>
         <div className='dsh-voice-modal-footer'>
-          <button type='button' className='dsh-voice-provider-btn is-primary' disabled={saving} onClick={save}>
-            {saving ? '保存中…' : '保存'}
-          </button>
-          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>取消</button>
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
           {message !== null && <span className='dsh-voice-setup-ok'>{message}</span>}
         </div>
       </div>

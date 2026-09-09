@@ -13,6 +13,7 @@
 // request — a rotated key reaches the next synthesis without a restart.
 
 import type { Context } from '@deepseek-ai/cordis'
+import { createHmac } from 'node:crypto'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { synthQwenOnce, type QwenSessionParams } from './tts-qwen.ts'
@@ -140,10 +141,21 @@ async function synthXfyun(
     throw new Error('未配置讯飞凭证：设置 → 语音对话 → 讯飞 → 设置，填写 App ID / API Key / API Secret')
   }
   const { WebSocket } = await import('ws')
-  const endpoint = (endpointOverride?.trim() || PROVIDER_ENDPOINTS.xfyun!) + '?output_proto=binary'
+  // iFlytek WebSocket auth ≠ Bearer. It wants three query params derived from
+  // an HMAC-SHA256 signature (authorization / date / host); a Bearer header
+  // always 401s. Signature origin is host/date/request-line.
+  const base = new URL(endpointOverride?.trim() || PROVIDER_ENDPOINTS.xfyun!)
+  base.searchParams.set('output_proto', 'binary')
+  const host = base.hostname
+  const date = new Date().toUTCString()
+  const signatureOrigin = `host: ${host}\ndate: ${date}\nGET ${base.pathname} HTTP/1.1`
+  const signature = createHmac('sha256', apiSecret!.value).update(signatureOrigin).digest('base64')
+  const authorizationOrigin = `api_key="${apiKey!.value}", algorithm="hmac-sha256", headers="host date request-line", signature="${signature}"`
+  base.searchParams.set('authorization', Buffer.from(authorizationOrigin, 'utf8').toString('base64'))
+  base.searchParams.set('date', date)
+  base.searchParams.set('host', host)
   return await new Promise<Buffer>((resolve, reject) => {
-    const socket = new WebSocket(endpoint, {
-      headers: { Authorization: `Bearer ${apiKey!.value}:${apiSecret!.value}` },
+    const socket = new WebSocket(base.toString(), {
       handshakeTimeout: 15_000,
     })
     const audio: Buffer[] = []
