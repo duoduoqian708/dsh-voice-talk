@@ -50,26 +50,26 @@ export function listVoiceThemes(): readonly VoiceTheme[] {
 
 registerVoiceTheme({
   id: 'system',
-  label: '系统语音（离线）',
+  label: '系统语音',
   create: () => new SystemTtsProvider(),
 })
 
 registerVoiceTheme({
   id: 'qwen',
-  label: '阿里千问（实时流式）',
+  label: '阿里千问',
   create: () => new QwenRealtimeTtsProvider(),
   needsSetup: true,
-  note: '千问3-TTS 实时合成，首包约 500ms，价格 1 元/万字符。需阿里云百炼平台 API Key。',
+  note: '约 1 元 / 万字符',
   setupUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
   defaultSpeaker: 'Cherry',
 })
 
 registerVoiceTheme({
   id: 'xfyun',
-  label: '讯飞在线合成（永久免费）',
+  label: '讯飞',
   create: () => new XfyunTtsProvider(),
   needsSetup: true,
-  note: '每日 500 次免费调用，永久。注册实名后创建应用即可。',
+  note: '约 500 次 / 日免费',
   setupUrl: 'https://www.xfyun.cn/services/online_tts',
   defaultSpeaker: 'x4_xiaoyan',
 })
