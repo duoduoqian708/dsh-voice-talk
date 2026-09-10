@@ -207,7 +207,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 /* ---- call overlay: light canvas, two glass tiles ----
    Performance contract: the canvas is a STATIC opaque light gradient (no
    filter, no animation). backdrop-filter sits on the two tiles + controls
-   whose backdrop never changes; per-frame motion (bars, breath, halos) is
+   whose backdrop never changes; per-frame motion (bars, breath) is
    transform/opacity only. Breath = who speaks; the other side rests. */
 .dsh-voice-call {
   position: fixed; inset: 0; z-index: 9999;
@@ -266,18 +266,6 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   color: #1D1D1F;
 }
 .dsh-voice-whale { width: 38px; height: auto; display: block; will-change: transform; }
-
-/* breath halos: pre-blurred rings behind each target (rasterized once) */
-.dsh-voice-halo {
-  position: absolute; inset: -20%;
-  border-radius: 50%;
-  filter: blur(12px);
-  pointer-events: none;
-  opacity: 0;
-  will-change: transform, opacity;
-}
-.dsh-voice-halo-blue { background: radial-gradient(circle, rgba(0, 122, 255, .38), rgba(0, 122, 255, .10) 58%, transparent 75%); }
-.dsh-voice-halo-red { background: radial-gradient(circle, rgba(255, 59, 48, .42), rgba(255, 59, 48, .10) 58%, transparent 75%); }
 
 /* signature element: voice-memos waveform (ink, round-capped bars) */
 .dsh-voice-wave {
@@ -623,7 +611,6 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   }
   .dsh-voice-wave-bar { transform: none !important; }
   .dsh-voice-whale, .dsh-voice-mickey { transform: none !important; }
-  .dsh-voice-halo { display: none !important; }
 }
 `
 

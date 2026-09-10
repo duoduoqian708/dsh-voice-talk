@@ -8,8 +8,8 @@
 //
 // Signature motion (v2 "Apple" direction): WHO speaks breathes — the whale
 // swells during speaking, the mute key during listening; both driven by a
-// two-layer signal (3.6s rest rhythm + heavily smoothed mic/synth amplitude)
-// with a halo that opens up the edges. All motion is transform/opacity.
+// two-layer signal (3.6s rest rhythm + heavily smoothed mic/synth amplitude).
+// All motion is transform/opacity.
 
 import { createPortal } from 'react-dom'
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -93,7 +93,7 @@ function PhoneGlyph(): ReactElement {
 /**
  * The call face's hero row: whale | waveform | mute key. One CallBreath
  * engine drives both breath targets (whale while speaking, key while
- * listening) and their halos; the live mic analyser feeds it while listening.
+ * listening); the live mic analyser feeds it while listening.
  * The wave slot itself is owned by the settings' voice-print: a lottie
  * preset ('equalizer' | 'wave') or the legacy mic-reactive bars fallback.
  */
@@ -102,8 +102,6 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: Voi
   const printRef = useRef<WavePrint | null>(null)
   const whaleRef = useRef<HTMLDivElement | null>(null)
   const keyRef = useRef<HTMLButtonElement | null>(null)
-  const haloWhaleRef = useRef<HTMLSpanElement | null>(null)
-  const haloKeyRef = useRef<HTMLSpanElement | null>(null)
   const waveRef = useRef<HTMLDivElement | null>(null)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
@@ -112,14 +110,12 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: Voi
     const waveEl = waveRef.current
     const whaleEl = whaleRef.current
     const keyEl = keyRef.current
-    const haloWhaleEl = haloWhaleRef.current
-    const haloKeyEl = haloKeyRef.current
-    if (waveEl === null || whaleEl === null || keyEl === null || haloWhaleEl === null || haloKeyEl === null) return
+    if (waveEl === null || whaleEl === null || keyEl === null) return
     // Known presets hand the slot to lottie; anything else keeps the legacy
     // mic-reactive bars (defensive fallback for a hand-edited config).
     const withBars = waveStyle !== 'equalizer' && waveStyle !== 'wave'
     const breath = new CallBreath({
-      whale: whaleEl, key: keyEl, haloWhale: haloWhaleEl, haloKey: haloKeyEl,
+      whale: whaleEl, key: keyEl,
     }, waveEl, () => phaseRef.current, withBars)
     breathRef.current = breath
     breath.start()
@@ -145,7 +141,6 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: Voi
   return (
     <div className='dsh-voice-hero'>
       <div className='dsh-voice-avatar-wrap' data-phase={phase}>
-        <span className='dsh-voice-halo dsh-voice-halo-blue' ref={haloWhaleRef} aria-hidden='true' />
         <div className='dsh-voice-avatar-circle' ref={whaleRef}>
           <WhaleMark className='dsh-voice-whale' />
         </div>
@@ -154,7 +149,6 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: Voi
       <div className='dsh-voice-wave' ref={waveRef} aria-hidden='true' />
 
       <div className='dsh-voice-mic-wrap'>
-        <span className='dsh-voice-halo dsh-voice-halo-red' ref={haloKeyRef} aria-hidden='true' />
         <button
           type='button'
           className='dsh-voice-mickey'

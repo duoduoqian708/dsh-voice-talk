@@ -3,9 +3,7 @@
 //     listening, synth-pulse motion while speaking, near-still when
 //     thinking/idle (quiet = respect);
 //   - the two breath targets: the whale circle swells while SPEAKING, the
-//     hang-up key swells while LISTENING — "who speaks breathes";
-//   - their halos: a pre-rasterized blur ring behind each target whose
-//     opacity/scale rides the same signal (the "soft edge" bloom).
+//     hang-up key swells while LISTENING — "who speaks breathes".
 // Breath is a two-layer signal: a 3.6s rest rhythm (alive even in silence)
 // plus a heavily smoothed amplitude (no jitter). Transform/opacity only.
 // Self-contained: the overlay mounts/unmounts it and feeds phase changes.
@@ -20,12 +18,10 @@ const BREATH_PERIOD_S = 3.6
 /** Amplitude smoothing factor per frame (heavy: no jitter, slow bloom). */
 const AMP_SMOOTH = 0.06
 
-/** Breath targets and their halos (refs into the overlay DOM). */
+/** Breath targets (refs into the overlay DOM). */
 export interface BreathTargets {
   whale: HTMLElement
   key: HTMLElement
-  haloWhale: HTMLElement
-  haloKey: HTMLElement
 }
 
 export class CallBreath {
@@ -48,7 +44,7 @@ export class CallBreath {
   #data: Uint8Array | null = null
 
   /** withBars=false hands the wave slot to the lottie voice-print; the
-   *  engine then only drives the breath targets and their halos. */
+   *  engine then only drives the breath targets. */
   constructor(targets: BreathTargets, waveContainer: HTMLElement, phaseOf: () => VoicePhase, withBars = true) {
     this.#targets = targets
     this.#wave = waveContainer
@@ -225,7 +221,7 @@ export class CallBreath {
     }
   }
 
-  // ---- breath targets + halos ------------------------------------------------
+  // ---- breath targets --------------------------------------------------------
 
   /** Two-layer breath: rest rhythm + smoothed amplitude; peak ~11%. */
   #breathDrive(): number {
@@ -234,24 +230,18 @@ export class CallBreath {
   }
 
   #tickBreath(phase: VoicePhase): void {
-    const { whale, key, haloWhale, haloKey } = this.#targets
+    const { whale, key } = this.#targets
     if (phase === 'speaking') {
       const drive = this.#breathDrive()
       whale.style.transform = `scale(${(1 + drive).toFixed(4)})`
-      haloWhale.style.opacity = (0.2 + drive * 4.6).toFixed(3)
-      haloWhale.style.transform = `scale(${(1 + drive * 0.8).toFixed(4)})`
     } else {
       whale.style.transform = ''
-      haloWhale.style.opacity = '0'
     }
     if (phase === 'listening') {
       const drive = this.#breathDrive()
       key.style.transform = `scale(${(1 + drive * 1.1).toFixed(4)})`
-      haloKey.style.opacity = (0.2 + drive * 4.8).toFixed(3)
-      haloKey.style.transform = `scale(${(1 + drive * 0.8).toFixed(4)})`
     } else {
       key.style.transform = ''
-      haloKey.style.opacity = '0'
     }
   }
 }
