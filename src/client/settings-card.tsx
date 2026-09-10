@@ -56,9 +56,9 @@ const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: strin
 }
 
 /** Theme → which settings fields its modal exposes (hard-coded, no framework). */
-const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string }[]> = {
+const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
   qwen: [
-    { field: 'qwenModel', label: '模型 ID', hint: '需为 qwen3-tts-*-realtime 系列' },
+    { field: 'qwenModel', label: '模型 ID', placeholder: 'qwen3-tts-flash-realtime' },
     { field: 'qwenEndpoint', label: '接口地址' },
   ],
   xfyun: [
@@ -230,9 +230,9 @@ const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]
 ]
 
 /** The 听 modal's per-engine settings fields (model/endpoint override). */
-const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string }[]> = {
+const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
   qwen: [
-    { field: 'asrQwenModel', label: '模型 ID', hint: 'qwen3-asr-flash-realtime / qwen-audio-3.0-asr-flash-streaming 等' },
+    { field: 'asrQwenModel', label: '模型 ID', placeholder: 'qwen3-asr-flash-realtime' },
     { field: 'asrQwenEndpoint', label: '接口地址' },
   ],
   xfyun: [
@@ -496,7 +496,7 @@ function EngineRow({
 interface ProviderModalVariant {
   title: string
   refs: readonly { ref: string; label: string; mask: boolean }[]
-  fields: readonly { field: string; label: string; hint?: string }[]
+  fields: readonly { field: string; label: string; hint?: string; placeholder?: string }[]
   note?: string
   setupUrl?: string
   /** false hides the TTS-only 试听 section (speaker + prompt + buttons). */
@@ -634,7 +634,7 @@ function ProviderModal({
             </span>
           </label>
         ))}
-        {fields.map(({ field, label, hint }) => (
+        {fields.map(({ field, label, hint, placeholder }) => (
           <label key={field} className='dsh-voice-row'>
             <span className='dsh-voice-row-label'>
               {label}
@@ -643,6 +643,7 @@ function ProviderModal({
             <input
               className='dsh-voice-input dsh-voice-input-wide'
               value={fieldDraft[field] ?? ''}
+              placeholder={placeholder ?? undefined}
               onChange={event => setFieldDraft(d => ({ ...d, [field]: event.target.value }))}
               onBlur={() => saveField(field)}
               onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
