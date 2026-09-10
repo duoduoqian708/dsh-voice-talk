@@ -162,12 +162,33 @@ const configuredCache = new Map<string, boolean>()
 /** Try-listen always reads at the default rate; live speed lives on the HUD. */
 const TRY_RATE = 1.0
 
+/** The try-listen player singleton + generation counter: a newer 试听 stops
+ *  the one on the air the moment it is clicked, and an older in-flight fetch
+ *  is discarded on arrival — two voices can never overlap. */
+let tryAudio: HTMLAudioElement | null = null
+let tryUrl: string | null = null
+let trySeq = 0
+
+function stopTryAudio(): void {
+  if (tryAudio !== null) {
+    tryAudio.pause()
+    tryAudio.src = ''
+    tryAudio = null
+  }
+  if (tryUrl !== null) {
+    URL.revokeObjectURL(tryUrl)
+    tryUrl = null
+  }
+}
+
 /** Try-listen through the one-shot bridge route (cloud themes). */
-function tryCloud(theme: string, voice: string, extra: Record<string, string>): void {
+function tryCloud(theme: string, voice: string, extra: Record<string, string>, text: string = TRY_TEXT): void {
+  const seq = ++trySeq
+  stopTryAudio()
   void fetch(`/voice-tts/${theme}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: TRY_TEXT, voice, rate: TRY_RATE, ...extra }),
+    body: JSON.stringify({ text, voice, rate: TRY_RATE, ...extra }),
   }).then(async response => {
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null
@@ -175,7 +196,15 @@ function tryCloud(theme: string, voice: string, extra: Record<string, string>): 
       return
     }
     const url = URL.createObjectURL(await response.blob())
-    new Audio(url).play().catch(() => undefined)
+    if (seq !== trySeq) {
+      // A newer click happened while this fetch was in flight — drop it.
+      URL.revokeObjectURL(url)
+      return
+    }
+    stopTryAudio()
+    tryUrl = url
+    tryAudio = new Audio(url)
+    void tryAudio.play().catch(() => undefined)
   })
 }
 
@@ -595,29 +624,12 @@ function ProviderModal({
       trySystem(speakerDraft || value.voiceName, value.voiceLang)
       return
     }
-    void fetch(`/voice-tts/${theme.id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: promptDraft,
-        voice: speakerDraft,
-        rate: TRY_RATE,
-        ...themeExtras(theme.id, {
-          ...value,
-          qwenModel: fieldDraft.qwenModel ?? value.qwenModel,
-          qwenEndpoint: fieldDraft.qwenEndpoint ?? value.qwenEndpoint,
-          xfyunEndpoint: fieldDraft.xfyunEndpoint ?? value.xfyunEndpoint,
-        }),
-      }),
-    }).then(async response => {
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null
-        window.alert(body?.error ?? '云端合成失败')
-        return
-      }
-      const url = URL.createObjectURL(await response.blob())
-      new Audio(url).play().catch(() => undefined)
-    })
+    tryCloud(theme.id, speakerDraft, themeExtras(theme.id, {
+      ...value,
+      qwenModel: fieldDraft.qwenModel ?? value.qwenModel,
+      qwenEndpoint: fieldDraft.qwenEndpoint ?? value.qwenEndpoint,
+      xfyunEndpoint: fieldDraft.xfyunEndpoint ?? value.xfyunEndpoint,
+    }), promptDraft)
   }
 
   return (
