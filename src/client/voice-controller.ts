@@ -421,7 +421,7 @@ export class VoiceController {
     }
     const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
-      onInterim: interim => this.status.patch({ interim }),
+      onInterim: interim => this.status.patch({ interim: this.#composeInterim(interim) }),
       onFinal: text => this.#onFinalUtterance(text),
       onSpeechActive: active => this.#onSpeechActive(active),
       onEnd: () => { /* the recognizer reconnects itself */ },
@@ -543,6 +543,21 @@ export class VoiceController {
     // Accumulate finalized text; the silence timer flushes it as one prompt.
     this.#pendingFinal = this.#pendingFinal === null ? text : `${this.#pendingFinal}，${text}`
     this.#resetSilenceTimer()
+    // Keep the finalized text on screen through the pause — the next
+    // utterance's interim would otherwise replace it visually (the data
+    // already survives in #pendingFinal; this is display continuity only).
+    this.status.patch({ interim: this.#pendingFinal })
+  }
+
+  /**
+   * Live display composer: finalized-but-unsubmitted text stays visible
+   * ahead of the current utterance's streaming interim, joined with the
+   * same '，' the submission uses — what the user reads is what will be sent.
+   */
+  #composeInterim(live: string): string {
+    if (this.#pendingFinal === null) return live
+    if (live === '') return this.#pendingFinal
+    return `${this.#pendingFinal}，${live}`
   }
 
   /** Drop capture for a moment after an echo hit, then re-arm cleanly. */
