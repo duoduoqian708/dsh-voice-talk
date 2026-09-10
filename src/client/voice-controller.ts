@@ -711,7 +711,7 @@ export class VoiceController {
     const piece = pending.slice(0, take)
     this.#streamFed += take
     this.#spokenText = (this.#spokenText ?? '') + piece
-    this.#session?.push(piece)
+    this.#ensureSession()?.push(piece)
   }
 
   /** End of turn: flush any tail still held by the partial, then settle. */
@@ -758,9 +758,11 @@ export class VoiceController {
     }
   }
 
-  /** Open a streaming session for the upcoming reply (theme-capable only). */
+  /** Reset the readout stream for the upcoming reply. The synthesis session
+   *  itself opens lazily on the first real sentence (#ensureSession): opened
+   *  at submit it idled through tool-heavy turns past the bridge's 120s
+   *  limit and died before any audio — text arrived, nothing was spoken. */
   #prepareStream(): void {
-    const settings = this.effectiveSettings()
     this.#streamRaw = ''
     this.#streamFed = 0
     this.#session = null
@@ -769,8 +771,14 @@ export class VoiceController {
     this.#spokenTailUntil = 0
     this.#spokenTurnId = null
     this.status.patch({ spokenTurn: null, spokenChars: 0 })
+  }
+
+  /** Open (or reuse) the synthesis session for the upcoming sentences. */
+  #ensureSession(): TtsSession | null {
+    if (this.#session !== null) return this.#session
     const provider = this.#speaker()
-    if (!provider.supported()) return
+    if (!provider.supported()) return null
+    const settings = this.effectiveSettings()
     const speaker = settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName
     try {
       const opts = { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) }
@@ -785,7 +793,9 @@ export class VoiceController {
         : sessionFromSpeak(provider, opts, interrupted, progress)
     } catch (error) {
       this.#notifyError(error instanceof Error ? error.message : String(error))
+      return null
     }
+    return this.#session
   }
 
   #endSpeaking(): void {

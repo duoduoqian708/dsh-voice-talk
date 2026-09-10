@@ -7,6 +7,48 @@
 
 import type { TtsProvider, TtsSession, SpeakOptions } from './speech.ts'
 
+// ---- live readout level (call-face wave feed) -------------------------------
+// Both engines expose the level of the audio actually sounding right now:
+// qwen pre-computes per-chunk RMS into the playback schedule; the bridge path
+// taps its Audio element through a MediaElementSource analyser. The wave
+// polls readTtsLevel() per frame — 0 = silence (flat idle line).
+
+let activePlayer: PcmStreamPlayer | null = null
+let tapCtx: AudioContext | null = null
+let tapAnalyser: AnalyserNode | null = null
+let tapData: Uint8Array<ArrayBuffer> | null = null
+let bridgePlaying = false
+
+/** Shared analyser tap for the bridge's Audio elements (created lazily). */
+function ensureTap(): { ctx: AudioContext; analyser: AnalyserNode } | null {
+  try {
+    const Ctor = window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (Ctor === undefined) return null
+    tapCtx ??= new Ctor()
+    tapAnalyser ??= tapCtx.createAnalyser()
+    tapAnalyser.fftSize = 512
+    tapData ??= new Uint8Array(tapAnalyser.fftSize)
+    return { ctx: tapCtx, analyser: tapAnalyser }
+  } catch {
+    return null
+  }
+}
+
+/** Playback level 0..1 of the currently sounding readout audio. */
+export function readTtsLevel(): number {
+  if (bridgePlaying && tapCtx !== null && tapAnalyser !== null && tapData !== null) {
+    tapAnalyser.getByteTimeDomainData(tapData)
+    let sum = 0
+    for (let i = 0; i < tapData.length; i++) {
+      const v = (tapData[i]! - 128) / 128
+      sum += v * v
+    }
+    return Math.min(1, Math.sqrt(sum / tapData.length) * 6)
+  }
+  return activePlayer?.level() ?? 0
+}
+
 /** Sentence-bounded chunking shared by the chunked cloud providers. */
 export function chunkForCloud(text: string, size = 120): string[] {
   if (text.length <= size) return [text]
@@ -212,21 +254,45 @@ export class BridgeAudioTtsProvider implements TtsProvider {
           const audio = new Audio()
           audio.src = url
           playing = { audio, url }
-          played += text.length
-          onProgress?.(played)
-          audio.onended = () => {
-            URL.revokeObjectURL(url)
-            busy = false
-            playing = null
-            if (settled) return
-            pump()
-          }
+          bridgePlaying = true
+          // Tap the element for the wave's playback level; the source must
+          // reconnect to destination or the element would go silent.
+          try {
+            const tap = ensureTap()
+            if (tap !== null) {
+              if (tap.ctx.state !== 'running') await tap.ctx.resume()
+              const source = tap.ctx.createMediaElementSource(audio)
+              source.connect(tap.analyser)
+              source.connect(tap.ctx.destination)
+              audio.onended = () => {
+                bridgePlaying = false
+                try { source.disconnect() } catch { /* already down */ }
+                URL.revokeObjectURL(url)
+                busy = false
+                playing = null
+                if (settled) return
+                pump()
+              }
+            }
+          } catch { /* untapped: the element keeps its default output */ }
           audio.onerror = () => {
+            bridgePlaying = false
             URL.revokeObjectURL(url)
             busy = false
             playing = null
             if (!settled) settleFail('音频播放失败')
           }
+          if (audio.onended === null) {
+            audio.onended = () => {
+              URL.revokeObjectURL(url)
+              busy = false
+              playing = null
+              if (settled) return
+              pump()
+            }
+          }
+          played += text.length
+          onProgress?.(played)
           void audio.play().catch(error => {
             busy = false
             playing = null
@@ -258,6 +324,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
             URL.revokeObjectURL(playing.url)
             playing = null
           }
+          bridgePlaying = false
           resolveDone?.()
         }
       },
@@ -296,6 +363,8 @@ class PcmStreamPlayer {
   #nextTime = 0
   #sources = new Set<AudioBufferSourceNode>()
   #cancelled = false
+  /** Playback schedule with per-chunk RMS, for the "sounding now" level. */
+  #levels: { start: number; end: number; rms: number }[] = []
 
   constructor() {
     const Ctor = window.AudioContext
@@ -304,6 +373,7 @@ class PcmStreamPlayer {
     this.#context = new Ctor({ sampleRate: 24_000 })
     this.#gain = this.#context.createGain()
     this.#gain.connect(this.#context.destination)
+    activePlayer = this
   }
 
   /** Feed one raw PCM delta (Int16LE mono); schedules it gapless. */
@@ -313,9 +383,13 @@ class PcmStreamPlayer {
     const frames = Math.floor(data.byteLength / 2)
     const buffer = this.#context.createBuffer(1, frames, 24_000)
     const channel = buffer.getChannelData(0)
+    let squareSum = 0
     for (let i = 0; i < frames; i++) {
-      channel[i] = view.getInt16(i * 2, true) / 32_768
+      const value = view.getInt16(i * 2, true) / 32_768
+      channel[i] = value
+      squareSum += value * value
     }
+    const rms = frames > 0 ? Math.sqrt(squareSum / frames) : 0
     const source = this.#context.createBufferSource()
     source.buffer = buffer
     source.connect(this.#gain)
@@ -323,10 +397,23 @@ class PcmStreamPlayer {
     // First chunk starts immediately; later chunks chain at the exact sample
     // boundary of the previous one.
     if (this.#nextTime < now + 0.02) this.#nextTime = now + 0.02
-    source.start(this.#nextTime)
+    const start = this.#nextTime
+    source.start(start)
     this.#nextTime += buffer.duration
+    this.#levels.push({ start, end: this.#nextTime, rms })
     this.#sources.add(source)
     source.onended = () => { this.#sources.delete(source) }
+  }
+
+  /** RMS (0..1) of the chunk sounding right now; 0 in gaps and silence. */
+  level(): number {
+    const now = this.#context.currentTime
+    while (this.#levels.length > 0 && this.#levels[0]!.end < now - 0.05) this.#levels.shift()
+    let active: { start: number; end: number; rms: number } | null = null
+    for (const entry of this.#levels) {
+      if (entry.start <= now + 0.02 && now < entry.end + 0.03) active = entry
+    }
+    return active === null ? 0 : Math.min(1, active.rms * 6)
   }
 
   /** Seconds of audio still queued (drains toward the session settle point). */
@@ -342,6 +429,8 @@ class PcmStreamPlayer {
   /** Stop now (barge-in / skip): unschedule everything, drop queued audio. */
   cancel(): void {
     this.#cancelled = true
+    this.#levels.length = 0
+    if (activePlayer === this) activePlayer = null
     for (const source of this.#sources) {
       try { source.stop() } catch { /* never started */ }
     }

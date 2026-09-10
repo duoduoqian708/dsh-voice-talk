@@ -9,6 +9,7 @@
 // Self-contained: the overlay mounts/unmounts it and feeds phase changes.
 
 import type { VoicePhase } from './types.ts'
+import { readTtsLevel } from './cloud-tts.ts'
 
 /** Grace period before the procedural fallback gives the mic another shot. */
 const MIC_RETRY_MS = 8_000
@@ -159,7 +160,9 @@ export class CallBreath {
     // Muted reads as idle: near-still bars, no breath, no live analyser.
     const phase: VoicePhase = this.#muted ? 'idle' : this.#phase
     const live = phase === 'listening' ? this.#liveAmp() : null
-    this.#levelSink?.(live ?? 0)
+    // The wave's source follows who is speaking: the user's mic level while
+    // listening, the readout's own playback level while the AI talks.
+    this.#levelSink?.(phase === 'speaking' ? readTtsLevel() : live ?? 0)
     const target = live ?? this.#proceduralAmp(phase)
     this.#amp += (target - this.#amp) * (live !== null ? 0.35 : 0.12)
     this.#ampSlow += (this.#amp - this.#ampSlow) * AMP_SMOOTH
