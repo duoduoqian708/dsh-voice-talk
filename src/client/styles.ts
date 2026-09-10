@@ -262,10 +262,12 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   font-variant-numeric: tabular-nums;
 }
 
-/* hero row: whale | waveform | hang-up, centered as one cluster */
+/* hero row: whale | waveform | hang-up, floating at the panel's vertical
+   center — the auto top margin splits the free space with the controls'
+   own auto margin, so the cluster centers while duration stays on top */
 .dsh-voice-hero {
   display: flex; align-items: center; justify-content: center;
-  gap: 18px; width: 100%; margin-top: 40px; flex: none;
+  gap: 18px; width: 100%; margin-top: auto; flex: none;
 }
 .dsh-voice-avatar-wrap {
   position: relative; width: 84px; height: 84px;

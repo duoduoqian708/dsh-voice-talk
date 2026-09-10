@@ -447,6 +447,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const ss = String(elapsed % 60).padStart(2, '0')
   const rate = settings().rate
   const waveStyle = settings().waveStyle
+  const mutedIdle = phase === 'listening' && micMuted
 
   return createPortal(
     <div className={`dsh-voice-call${collapsed ? ' is-collapsed' : ''}`} data-phase={phase}>
@@ -456,13 +457,14 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
 
         <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} utteranceStartAt={utteranceStartAt} />
 
-        <div className='dsh-voice-state-word'>{phase === 'listening' && micMuted ? '已静音' : PHASE_WORD[phase]}</div>
+        <div className='dsh-voice-state-word' style={mutedIdle ? { visibility: 'hidden' } : undefined} aria-hidden={mutedIdle || undefined}>
+          {PHASE_WORD[phase]}
+        </div>
 
         <div className='dsh-voice-live' aria-live='polite'>
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
           {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 点击底层页面卡片处理</div>}
-          {phase === 'listening' && micMuted && <div className='dsh-voice-live-warn'>麦克风已静音 — 点右侧麦克风恢复</div>}
           {phase === 'listening' && !micMuted && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
           {phase !== 'listening' && (error === null && !setupMissing && pendingCount === 0) && (
             <div className='dsh-voice-live-hint'>{phase === 'thinking' ? '正在组织回复…' : phase === 'speaking' ? '正在播报' : '说话即发送'}</div>
