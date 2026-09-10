@@ -523,6 +523,9 @@ function ProviderModal({
   const [draft, setDraft] = useState<Record<string, string>>({})
   /** Masked preview of values saved THIS session (head/tail of keys). */
   const [savedPreview, setSavedPreview] = useState<Record<string, string>>({})
+  /** Stored credentials as head****tail, served by the host status route —
+   *  so the preview survives reloads (the browser never gets full values). */
+  const [storedPreview, setStoredPreview] = useState<Record<string, string>>({})
   const [fieldDraft, setFieldDraft] = useState<Record<string, string>>(
     Object.fromEntries(fields.map(f => [f.field, String(value[f.field as keyof Required<VoiceSettings>] ?? '')])),
   )
@@ -539,6 +542,12 @@ function ProviderModal({
       const list = response.result.value?.credentials ?? {}
       setCredState(Object.fromEntries(refs.map(r => [r.ref, list[r.ref]?.configured === true])))
     }).catch(() => { /* inputs stay editable */ })
+    // The host masks stored values head****tail itself; this is what makes
+    // the preview survive a reload (fresh session, no savedPreview yet).
+    void fetch('/voice-tts/status').then(r => r.json()).then((body: { previews?: Record<string, string> }) => {
+      if (!alive) return
+      setStoredPreview(body.previews ?? {})
+    }).catch(() => { /* badge falls back to 已配置 */ })
     return () => { alive = false }
   }, [credentials, refs])
 
@@ -630,7 +639,9 @@ function ProviderModal({
               />
               {savedPreview[ref] !== undefined
                 ? <span className='dsh-voice-cred-badge'>{savedPreview[ref]}</span>
-                : credState[ref] === true && <span className='dsh-voice-cred-badge'>{mask ? '已配置' : '已保存'}</span>}
+                : storedPreview[ref] !== undefined && storedPreview[ref] !== ''
+                  ? <span className='dsh-voice-cred-badge'>{storedPreview[ref]}</span>
+                  : credState[ref] === true && <span className='dsh-voice-cred-badge'>{mask ? '已配置' : '已保存'}</span>}
             </span>
           </label>
         ))}

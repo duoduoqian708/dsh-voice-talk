@@ -26,6 +26,14 @@ const PROVIDER_REFS: Record<string, readonly string[]> = {
   qwen: ['VOICE_QWEN_API_KEY'],
 }
 
+/** Masked on-page preview of a stored credential: head/tail visible, middle
+ *  sealed (the user asked for exactly this display). The APPID is not
+ *  secret and shows in full; the full values never leave the host. */
+function credentialPreview(ref: string, value: string): string {
+  if (ref === 'VOICE_XF_APP_ID' || value.length <= 12) return value
+  return `${value.slice(0, 4)}****${value.slice(-4)}`
+}
+
 /** Vendor default endpoints, overridable per request (`endpoint` in the body). */
 const PROVIDER_ENDPOINTS: Record<string, string> = {
   xfyun: 'wss://tts-api.xfyun.cn/v2/tts',
@@ -76,13 +84,23 @@ export function makeVoiceTtsRoutes(ctx: Context): WebRoute[] {
     handler: async (req, res) => {
       if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'method-not-allowed' })
       const creds = credentials()
-      if (creds === undefined) return json(res, 200, { providers: {} })
+      if (creds === undefined) return json(res, 200, { providers: {}, previews: {} })
       const providers: Record<string, boolean> = {}
+      const previews: Record<string, string> = {}
       for (const [provider, refs] of Object.entries(PROVIDER_REFS)) {
+        for (const ref of refs) {
+          const view = await creds.resolve(credentialRef(ref)).catch(() => undefined)
+          const value = view?.value
+          if (value === undefined || value === '') {
+            previews[ref] = ''
+          } else {
+            previews[ref] = credentialPreview(ref, value)
+          }
+        }
         const views = await Promise.all(refs.map(async ref => creds.describe(credentialRef(ref)).catch(() => undefined)))
         providers[provider] = views.every(view => view?.configured === true)
       }
-      return json(res, 200, { providers })
+      return json(res, 200, { providers, previews })
     },
   }
 
@@ -166,6 +184,22 @@ async function synthXfyun(
     socket.on('error', (error: Error) => {
       clearTimeout(timer)
       reject(new Error(`讯飞连接失败：${error.message}`))
+    })
+    // Handshake rejections surface here, not as socket errors — read the
+    // vendor's body (e.g. {"message":"…apikey not found"}) so the 试听 alert
+    // shows the precise reason instead of a bare status code.
+    socket.on('unexpected-response', (_req, response) => {
+      const res = response as import('node:http').IncomingMessage
+      let body = ''
+      res.on('data', (chunk: Buffer) => { body += chunk.toString('utf8') })
+      res.on('end', () => {
+        clearTimeout(timer)
+        reject(new Error(`讯飞合成握手被拒：${res.statusCode} ${body.slice(0, 200)}`))
+      })
+      setTimeout(() => {
+        clearTimeout(timer)
+        reject(new Error(`讯飞合成握手被拒：${res.statusCode}`))
+      }, 500)
     })
     socket.on('message', (data: Buffer, isBinary: boolean) => {
       if (isBinary) {
