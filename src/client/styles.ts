@@ -252,17 +252,22 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 
 /* ---- left: the call face (half the stage; full stage when collapsed) ---- */
 .dsh-voice-left {
+  position: relative; z-index: 1;
   flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center;
   padding: 20px 20px 24px;
-  border-radius: 28px;
+  /* Junction side squared: the tiles read as ONE surface split by the 1px
+     border-right hairline (the right tile drops its left border). */
+  border-radius: 28px 0 0 28px;
   background: rgba(255, 255, 255, .72);
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid rgba(0, 0, 0, .08);
   box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
   animation: dsh-tile-in .35s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)) backwards;
+  transition: border-radius .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
 }
+.dsh-voice-call.is-collapsed .dsh-voice-left { border-radius: 28px; }
 @keyframes dsh-tile-in {
   from { opacity: 0; transform: scale(.98); } to { opacity: 1; transform: none; }
 }
@@ -506,17 +511,20 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 /* ---- right: the collapsible session stream ---- */
 .dsh-voice-right {
   position: relative;
-  flex: 1 1 0; min-width: 0; margin-left: 16px;
+  flex: 1 1 0; min-width: 0; margin-left: 0;
   display: flex;
-  border-radius: 28px;
+  /* The left border is dropped: the junction hairline is the LEFT tile's
+     border-right — two adjacent borders would read as a 2px seam. */
+  border-radius: 0 28px 28px 0;
   background: rgba(255, 255, 255, .72);
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid rgba(0, 0, 0, .08);
+  border-left: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
   overflow: hidden;
   animation: dsh-tile-in .35s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)) .05s backwards;
-  transition: flex-grow .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), margin-left .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), opacity .25s, transform .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
+  transition: flex-grow .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), margin-left .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), opacity .25s, transform .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), border-radius .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
 }
 .dsh-voice-call.is-collapsed .dsh-voice-right {
   flex-grow: 0; margin-left: 0;
@@ -680,39 +688,39 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-/* collapse handle: stage-level tab at the right edge — outside the stream
-   tile so it survives the tile's fade-out and stays clickable when folded */
+/* collapse handle: rides the divider line (the left tile's right edge) at
+   mid-height; the flex transition carries it to the screen edge on fold */
 .dsh-voice-collapse {
-  position: absolute; top: 50%; right: 30px;
-  transform: translateY(-50%);
-  width: 32px; height: 64px;
-  border: 1px solid rgba(0, 0, 0, .12);
-  border-radius: 999px;
+  position: absolute; top: 50%; right: 0;
+  transform: translate(50%, -50%);
+  width: 28px; height: 28px;
+  border: 1px solid rgba(0, 0, 0, .1);
+  border-radius: 50%;
   background: #fff;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .14);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .16);
   display: grid; place-items: center;
   cursor: pointer; padding: 0;
   transition: background .15s, transform .15s;
   z-index: 10;
 }
-.dsh-voice-collapse:hover { background: #fff; transform: translateY(-50%) scale(1.06); }
+.dsh-voice-collapse:hover { background: #fff; transform: translate(50%, -50%) scale(1.08); }
 .dsh-voice-collapse i {
-  width: 9px; height: 9px;
-  border-left: 2px solid #6E6E73; border-bottom: 2px solid #6E6E73;
+  width: 7px; height: 7px;
+  border-right: 2px solid #6E6E73; border-bottom: 2px solid #6E6E73;
   transition: transform .3s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
-  transform: rotate(-45deg) scale(.9);
-  margin-right: -2px;
+  transform: rotate(-45deg) scale(.9); /* ">" — fold the stream away */
+  margin-right: 2px;
 }
 .dsh-voice-call.is-collapsed .dsh-voice-collapse i {
-  transform: rotate(135deg) scale(.9);
-  margin-right: 2px;
+  transform: rotate(135deg) scale(.9); /* "<" — bring it back */
+  margin-right: 0;
+  margin-left: 2px;
 }
 
 @media (max-width: 860px) {
   .dsh-voice-call { flex-direction: column; padding: 10px; }
-  .dsh-voice-left { flex: 0 0 auto; }
-  .dsh-voice-right { flex: 1 1 0; margin-left: 0; margin-top: 10px; }
-  .dsh-voice-collapse { top: auto; bottom: 14px; }
+  .dsh-voice-left { flex: 0 0 auto; border-radius: 28px; }
+  .dsh-voice-right { flex: 1 1 0; margin-left: 0; margin-top: 10px; border-left: 1px solid rgba(0, 0, 0, .08); border-radius: 28px; }
   .dsh-voice-hero { gap: 12px; margin-top: 20px; }
   .dsh-voice-avatar-wrap { width: 76px; height: 76px; }
   .dsh-voice-avatar-circle { width: 68px; height: 68px; }

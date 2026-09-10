@@ -469,6 +469,19 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
             跳过播报
           </button>
         </div>
+
+        {/* Collapse handle rides the left tile's right edge — the divider
+            line itself — so the flex transition carries it along the fold. */}
+        <button
+          type='button'
+          className='dsh-voice-collapse'
+          title={collapsed ? '展开信息流' : '收起信息流'}
+          aria-label='收起或展开信息流'
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed(c => !c)}
+        >
+          <i />
+        </button>
       </aside>
 
       <section className='dsh-voice-right' aria-label='会话内容'>
@@ -525,18 +538,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
           )}
         </div>
       </section>
-      {/* Collapse handle lives at the stage level so it stays visible and
-          clickable when the right tile itself fades to zero width. */}
-      <button
-        type='button'
-        className='dsh-voice-collapse'
-        title={collapsed ? '展开信息流' : '收起信息流'}
-        aria-label='收起或展开信息流'
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed(c => !c)}
-      >
-        <i />
-      </button>
     </div>,
     document.body,
   )
