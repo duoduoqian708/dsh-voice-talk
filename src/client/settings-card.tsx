@@ -64,6 +64,29 @@ const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string
   ],
 }
 
+/** 声纹效果 presets：静态缩略图（不引 lottie、不播动画），选中即写入 waveStyle。 */
+const WAVE_PRINTS: readonly { id: string; art: ReactElement }[] = [
+  {
+    id: 'equalizer',
+    art: (
+      <svg viewBox='0 0 120 48' aria-hidden='true'>
+        {[12, 22, 14, 34, 18, 40, 24, 30, 12, 36, 16, 26, 20, 10].map((h, i) => (
+          <rect key={i} x={6 + i * 8} y={24 - h / 2} width={5} height={h} rx={2.5} fill='#3D9BE9' />
+        ))}
+      </svg>
+    ),
+  },
+  {
+    id: 'wave',
+    art: (
+      <svg viewBox='0 0 120 48' aria-hidden='true' fill='none'>
+        <path d='M4 24 Q14 10 24 24 T44 24 T64 24 T84 24 T104 24 T120 24' stroke='#7DD5D9' strokeWidth={2} strokeLinecap='round' />
+        <path d='M4 24 Q14 17 24 24 T44 24 T64 24 T84 24 T104 24 T120 24' stroke='#7DD5D9' strokeWidth={1} strokeLinecap='round' opacity={0.55} />
+      </svg>
+    ),
+  },
+]
+
 /** Toggle row: a plain CSS dot slider (platform-style switch). */
 function Toggle({ label, hint, on, disabled, onChange }: { label: string; hint?: string; on: boolean; disabled?: boolean; onChange(next: boolean): void }): ReactElement {
   return (
@@ -548,6 +571,22 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
           <Field label='播报字数上限' hint={value.maxReadoutChars === 0 ? '0 = 不限；播报自动剔除推理与代码' : '播报自动剔除推理与代码'}
             value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
+        </div>
+
+        <div className='dsh-voice-panel-sep' aria-hidden='true' />
+
+        <div className='dsh-voice-panel-sec'>
+          <div className='dsh-voice-panel-title'>声纹效果</div>
+          <div className='dsh-voice-print-grid'>
+            {WAVE_PRINTS.map(print => (
+              <button key={print.id} type='button'
+                className={`dsh-voice-print-card${value.waveStyle === print.id ? ' is-selected' : ''}`}
+                disabled={disabled}
+                onClick={() => { if (!disabled) set('waveStyle', print.id) }}>
+                <span className='dsh-voice-print-thumb'>{print.art}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className='dsh-voice-panel-sep' aria-hidden='true' />

@@ -99,6 +99,23 @@ const CSS = `
 .dsh-voice-provider-btn.is-primary { background: #007AFF; color: #fff; }
 .dsh-voice-provider-btn.is-primary:hover { background: #0071EB; }
 
+/* ---- voice-print picker: two static thumbnails, the selected one framed ---- */
+.dsh-voice-print-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dsh-voice-print-card {
+  padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  border: 1.5px solid rgba(0, 0, 0, .1); background: rgba(0, 0, 0, .03);
+  display: grid; place-items: center;
+  transition: border-color .15s, box-shadow .15s;
+}
+.dsh-voice-print-card:hover { border-color: rgba(0, 0, 0, .22); }
+.dsh-voice-print-card.is-selected {
+  border-color: #007AFF;
+  box-shadow: 0 0 0 2.5px rgba(0, 122, 255, .18);
+}
+.dsh-voice-print-card:disabled { opacity: .45; cursor: default; }
+.dsh-voice-print-thumb { display: block; width: 100%; }
+.dsh-voice-print-thumb svg { display: block; width: 100%; height: 44px; }
+
 /* ---- settings card: provider settings modal ----
    Light panel, 24px radius, hairline shadow; dark adapts via the host's
    body[data-ds-dark-theme] attribute (the theme presenter sets it). */
@@ -164,8 +181,28 @@ body[data-ds-dark-theme] .dsh-voice-provider-btn:hover { background: rgba(255, 2
 body[data-ds-dark-theme] .dsh-voice-provider-btn.is-primary { background: #007AFF; color: #fff; }
 body[data-ds-dark-theme] .dsh-voice-input { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .14); color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-input:focus { border-color: rgba(255, 255, 255, .45); }
+body[data-ds-dark-theme] .dsh-voice-print-card { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .12); }
+body[data-ds-dark-theme] .dsh-voice-print-card:hover { border-color: rgba(255, 255, 255, .25); }
 body[data-ds-dark-theme] .dsh-voice-switch { background: rgba(255, 255, 255, .2); }
 body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgba(0, 0, 0, .5) 0 0 1px 0, rgba(0, 0, 0, .4) 0 8px 24px 0; }
+/* call-overlay dark adaptations: hero key, markers, reasoning + tool cards */
+body[data-ds-dark-theme] .dsh-voice-mickey { background: #232A3B; border-color: rgba(255, 255, 255, .12); color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-mickey[data-muted='true'] { color: #FF6961; border-color: rgba(255, 105, 97, .45); }
+body[data-ds-dark-theme] .dsh-voice-marked { background: rgba(106, 184, 255, .16); }
+body[data-ds-dark-theme] .dsh-voice-reasoning-head { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-reasoning-head:hover { color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-reasoning-body { background: rgba(255, 255, 255, .05); color: rgba(230, 237, 247, .7); }
+body[data-ds-dark-theme] .dsh-voice-tool-head { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .04); color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-tool-head:hover { background: rgba(255, 255, 255, .08); }
+body[data-ds-dark-theme] .dsh-voice-tool-status,
+body[data-ds-dark-theme] .dsh-voice-tool-toggle,
+body[data-ds-dark-theme] .dsh-voice-tool-args { color: rgba(230, 237, 247, .5); }
+body[data-ds-dark-theme] .dsh-voice-quote { color: rgba(230, 237, 247, .72); border-left-color: rgba(255, 255, 255, .18); }
+body[data-ds-dark-theme] .dsh-voice-hr { border-top-color: rgba(255, 255, 255, .14); }
+body[data-ds-dark-theme] .dsh-voice-inline-code { background: rgba(255, 255, 255, .12); color: #FF9FB2; }
+body[data-ds-dark-theme] .dsh-voice-link { color: #6AB8FF; }
+body[data-ds-dark-theme] .dsh-voice-table th, body[data-ds-dark-theme] .dsh-voice-table td { border-color: rgba(255, 255, 255, .14); }
+body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .06); }
 
 /* ---- call overlay: light canvas, two glass tiles ----
    Performance contract: the canvas is a STATIC opaque light gradient (no
@@ -256,20 +293,22 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 .dsh-voice-call[data-phase="thinking"] .dsh-voice-wave-bar,
 .dsh-voice-call[data-phase="idle"] .dsh-voice-wave-bar { opacity: .25; }
 
-.dsh-voice-hangup-wrap { position: relative; flex: none; display: grid; place-items: center; }
-.dsh-voice-hangup {
+/* hero mute key: the mic circle where the hang-up used to live */
+.dsh-voice-mic-wrap { position: relative; flex: none; display: grid; place-items: center; }
+.dsh-voice-mickey {
   position: relative; z-index: 1;
   width: 72px; height: 72px; border-radius: 50%; cursor: pointer;
-  background: #FF3B30;
-  border: none;
-  color: #fff;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, .08);
+  color: #1D1D1F;
   display: inline-flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(255, 59, 48, .3);
-  transition: filter .15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+  transition: filter .15s, color .15s, border-color .15s;
   will-change: transform;
 }
-.dsh-voice-hangup:hover { filter: brightness(1.08); }
-.dsh-voice-hangup:active { filter: brightness(.94); }
+.dsh-voice-mickey:hover { filter: brightness(.97); }
+.dsh-voice-mickey:active { filter: brightness(.94); }
+.dsh-voice-mickey[data-muted='true'] { color: #FF3B30; border-color: rgba(255, 59, 48, .35); }
 
 .dsh-voice-state-word {
   margin-top: 14px;
@@ -338,6 +377,9 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
   font-size: 14px;
 }
 .dsh-voice-rate { font-variant-numeric: tabular-nums; }
+/* the moved hang-up: a segmented cell with the red phone glyph */
+.dsh-voice-hangup-ctl { color: #FF3B30; }
+.dsh-voice-hangup-ctl:hover, .dsh-voice-hangup-ctl:focus-within { background: rgba(255, 59, 48, .08); }
 
 /* skip row (visible while speaking; reserved space, no layout jump) */
 .dsh-voice-hangup-row {
@@ -405,6 +447,94 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
   white-space: pre-wrap; word-break: break-word;
 }
 .dsh-voice-prose + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-code, .dsh-voice-code + .dsh-voice-prose { margin-top: 8px; }
+/* karaoke marker: the run the readout has already played */
+.dsh-voice-marked {
+  background: rgba(0, 122, 255, .10);
+  border-radius: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---- markdown shapes (headings / lists / quotes / tables / inline) ---- */
+.dsh-voice-heading { margin: 10px 0 4px; line-height: 1.4; word-break: break-word; }
+.dsh-voice-heading:first-child { margin-top: 0; }
+.dsh-voice-heading + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-heading { margin-top: 8px; }
+.dsh-voice-list { margin: 6px 0 0; padding-left: 20px; }
+.dsh-voice-list li { margin: 3px 0; font-size: 14.5px; line-height: 1.5; word-break: break-word; }
+.dsh-voice-list:first-child { margin-top: 0; }
+.dsh-voice-quote {
+  margin: 8px 0 0; padding: 2px 0 2px 10px;
+  border-left: 3px solid rgba(0, 0, 0, .14);
+  font-size: 14px; line-height: 1.5; color: #55565B;
+  word-break: break-word; white-space: pre-wrap;
+}
+.dsh-voice-quote:first-child { margin-top: 0; }
+.dsh-voice-hr { margin: 10px 0; border: none; border-top: 1px solid rgba(0, 0, 0, .12); }
+.dsh-voice-inline-code {
+  padding: 1px 5px; border-radius: 5px;
+  background: rgba(0, 0, 0, .07); color: #D6336C;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px;
+}
+.dsh-voice-link { color: #007AFF; text-decoration: none; word-break: break-word; }
+.dsh-voice-link:hover { text-decoration: underline; }
+.dsh-voice-table-wrap { margin: 8px 0 0; overflow-x: auto; border-radius: 8px; }
+.dsh-voice-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 13.5px; line-height: 1.5;
+}
+.dsh-voice-table th, .dsh-voice-table td {
+  padding: 6px 9px; text-align: left; vertical-align: top;
+  border: 1px solid rgba(0, 0, 0, .1); word-break: break-word;
+}
+.dsh-voice-table th { background: rgba(0, 0, 0, .045); font-weight: 600; }
+
+/* collapsible reasoning (the native stream's thinking section) */
+.dsh-voice-reasoning { margin-top: 6px; }
+.dsh-voice-reasoning-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: none; cursor: pointer; padding: 2px 0;
+  font-size: 12px; color: #86868B;
+}
+.dsh-voice-reasoning-head:hover { color: #1D1D1F; }
+.dsh-voice-reasoning-dot { width: 6px; height: 6px; border-radius: 50%; background: #86868B; }
+.dsh-voice-reasoning-toggle { font-size: 11px; opacity: .7; }
+.dsh-voice-reasoning-body {
+  margin: 6px 0 0; padding: 8px 10px;
+  font-size: 12.5px; line-height: 1.55; color: #6E6E73;
+  background: rgba(0, 0, 0, .035); border-radius: 10px;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 240px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
+}
+
+/* tool cards: call heads, running calls, settled results */
+.dsh-voice-tool { margin-top: 6px; min-width: 0; }
+.dsh-voice-tool-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid rgba(0, 0, 0, .08); border-radius: 10px;
+  background: rgba(0, 0, 0, .025); cursor: pointer; padding: 6px 10px;
+  font-size: 12.5px; color: #1D1D1F; text-align: left;
+  transition: background .15s;
+}
+.dsh-voice-tool-head:hover { background: rgba(0, 0, 0, .05); }
+.dsh-voice-tool-status { flex: none; font-size: 11px; color: #86868B; }
+.dsh-voice-tool[data-ok='false'] .dsh-voice-tool-status { color: #FF3B30; }
+.dsh-voice-tool[data-ok='true'] .dsh-voice-tool-status { color: #34C759; }
+.dsh-voice-tool[data-running='true'] .dsh-voice-tool-status { color: #007AFF; animation: dsh-voice-pulse 1.4s ease-in-out infinite; }
+.dsh-voice-tool-name { flex: none; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.dsh-voice-tool-args {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: #86868B;
+}
+.dsh-voice-tool-toggle { flex: none; font-size: 11px; color: #86868B; }
+.dsh-voice-tool-body {
+  margin: 6px 0 0; padding: 8px 10px; border-radius: 10px;
+  max-height: 220px; overflow: auto;
+  background: #292A30; color: #F5F5F7;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.25) transparent;
+}
 .dsh-voice-code {
   margin: 0; padding: 10px 12px; border-radius: 10px; overflow-x: auto;
   background: #292A30; border: none;
@@ -432,14 +562,18 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 }
 .dsh-voice-typing i:nth-child(2) { animation-delay: .15s; }
 .dsh-voice-typing i:nth-child(3) { animation-delay: .3s; }
+.dsh-voice-typing-label {
+  margin-left: 6px; font-size: 13px; line-height: 1; color: #86868B;
+}
 @keyframes dsh-typing {
   0%, 60%, 100% { opacity: .3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
 }
 
-/* collapse handle: floats at the right edge, outside the stream */
+/* collapse handle: stage-level tab at the right edge — outside the stream
+   tile so it survives the tile's fade-out and stays clickable when folded */
 .dsh-voice-collapse {
-  position: absolute; top: 50%; right: 14px;
+  position: absolute; top: 50%; right: 30px;
   transform: translateY(-50%);
   width: 32px; height: 64px;
   border: 1px solid rgba(0, 0, 0, .12);
@@ -473,7 +607,7 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
   .dsh-voice-avatar-wrap { width: 76px; height: 76px; }
   .dsh-voice-avatar-circle { width: 68px; height: 68px; }
   .dsh-voice-whale { width: 36px; }
-  .dsh-voice-hangup { width: 68px; height: 68px; }
+  .dsh-voice-mickey { width: 68px; height: 68px; }
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
   .dsh-voice-duration { margin-top: 2px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
@@ -486,7 +620,7 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
     animation: none !important;
   }
   .dsh-voice-wave-bar { transform: none !important; }
-  .dsh-voice-whale, .dsh-voice-hangup { transform: none !important; }
+  .dsh-voice-whale, .dsh-voice-mickey { transform: none !important; }
   .dsh-voice-halo { display: none !important; }
 }
 `

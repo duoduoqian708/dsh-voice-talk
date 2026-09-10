@@ -44,6 +44,8 @@ export interface Config {
   qwenEndpoint?: string
   /** iFlytek TTS WS endpoint (preset ships the official address). */
   xfyunEndpoint?: string
+  /** Voice-print preset shown in the call face ('equalizer' | 'wave'). */
+  waveStyle?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -61,6 +63,7 @@ export const Config: z<Config> = z.object({
   qwenModel: z.string().default(QWEN_DEFAULT_MODEL),
   qwenEndpoint: z.string().default(QWEN_DEFAULT_ENDPOINT),
   xfyunEndpoint: z.string().default('wss://tts-api.xfyun.cn/v2/tts'),
+  waveStyle: z.string().default('wave'),
 })
 
 /**

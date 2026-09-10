@@ -21,6 +21,8 @@ export interface VoiceSettings {
   qwenEndpoint?: string
   /** iFlytek TTS WS endpoint. */
   xfyunEndpoint?: string
+  /** Voice-print preset shown in the call face ('equalizer' | 'wave'). */
+  waveStyle?: string
 }
 
 /** Defaults matching the host schema, applied when a field is absent. */
@@ -37,6 +39,7 @@ export const VOICE_DEFAULTS: Required<VoiceSettings> = {
   qwenModel: 'qwen3-tts-flash-realtime',
   qwenEndpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
   xfyunEndpoint: 'wss://tts-api.xfyun.cn/v2/tts',
+  waveStyle: 'wave',
 }
 
 /** Magnet stops of the rate slider (all within every vendor's hard cap). */
@@ -72,5 +75,6 @@ export function resolveSettings(section: VoiceSettings | undefined): Required<Vo
     qwenModel: value.qwenModel ?? VOICE_DEFAULTS.qwenModel,
     qwenEndpoint: value.qwenEndpoint ?? VOICE_DEFAULTS.qwenEndpoint,
     xfyunEndpoint: value.xfyunEndpoint ?? VOICE_DEFAULTS.xfyunEndpoint,
+    waveStyle: value.waveStyle ?? VOICE_DEFAULTS.waveStyle,
   }
 }
