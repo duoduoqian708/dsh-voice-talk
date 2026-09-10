@@ -609,6 +609,9 @@ export class VoiceController {
    */
   #watchForReply(): void {
     this.#unsubscribeSnapshot?.()
+    // Newest-wins readout: a new prompt invalidates every finalized reply
+    // sitting unspoken (generated while unwatched) — never read stale debt.
+    this.#lastSpokenSeq = this.#latestAssistantSeq()
     this.#sawTurnActivity = false
     this.#unsubscribeSnapshot = this.#deps.subscribeSnapshot(() => this.#onSnapshotStream())
     this.#bumpReplyTimer()
