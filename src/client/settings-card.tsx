@@ -518,7 +518,11 @@ function ProviderModal({
   const refs = variant?.refs ?? THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
   const fields = variant?.fields ?? THEME_MODAL_FIELDS[theme.id] ?? []
   const speakers = speakersForTheme(theme.id, value.voiceLang)
-  const savedSpeaker = value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? ''
+  // A stored '' (the retired 主题默认 option) reads as the theme default.
+  const storedSpeaker = value.speakerByTheme[theme.id]
+  const savedSpeaker = (storedSpeaker === undefined || storedSpeaker === '')
+    ? (theme.defaultSpeaker ?? '')
+    : storedSpeaker
   const [credState, setCredState] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Record<string, string>>({})
   /** Masked preview of values saved THIS session (head/tail of keys). */
@@ -677,7 +681,7 @@ function ProviderModal({
               value={speakerDraft}
               onChange={event => setSpeakerDraft(event.target.value)}
             >
-              {renderSpeakerOptions(speakers)}
+              {renderSpeakerOptions(speakers, value.speakerByTheme[theme.id] ?? theme.defaultSpeaker)}
             </select>
             <button
               type='button'
@@ -715,12 +719,12 @@ function ProviderModal({
 }
 
 /** Render a (possibly grouped) speaker roster as select children. */
-function renderSpeakerOptions(speakers: ReturnType<typeof speakersForTheme>): ReactElement[] {
+function renderSpeakerOptions(speakers: ReturnType<typeof speakersForTheme>, defaultId?: string): ReactElement[] {
   const groups = [...new Set(speakers.filter(o => 'group' in o).map(o => (o as { group: string }).group))]
   if (groups.length === 0) {
     return speakers.map(option => (
       <option key={option.id || '__default'} value={option.id}>
-        {'more' in option ? `更多 · ${option.label}` : option.label}
+        {option.label}{option.id === defaultId ? '（默认）' : ''}
       </option>
     ))
   }
@@ -729,7 +733,7 @@ function renderSpeakerOptions(speakers: ReturnType<typeof speakersForTheme>): Re
     out.push(
       <optgroup key={group} label={group}>
         {speakers.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => (
-          <option key={option.id} value={option.id}>{option.label}</option>
+          <option key={option.id} value={option.id}>{option.label}{option.id === defaultId ? '（默认）' : ''}</option>
         ))}
       </optgroup>,
     )

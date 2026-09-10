@@ -177,10 +177,10 @@ export const XFYUN_SPEAKERS: readonly SpeakerOption[] = [
  */
 export function speakersForTheme(themeId: string, lang: string): Array<SpeakerOption | { id: string; label: string; more: true }> {
   if (themeId === 'qwen') {
-    return [...QWEN_SPEAKERS.map(o => ({ ...o })), { id: '', label: '主题默认（芊悦）', more: true }]
+    return [...QWEN_SPEAKERS.map(o => ({ ...o }))]
   }
   if (themeId === 'xfyun') {
-    return [...XFYUN_SPEAKERS.map(o => ({ ...o })), { id: '', label: '主题默认（小露）', more: true }]
+    return [...XFYUN_SPEAKERS.map(o => ({ ...o }))]
   }
   return speakerOptions(lang)
 }

@@ -569,9 +569,11 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
  */
 function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase'] }): ReactElement {
   const theme = settings().ttsTheme
-  const current = settings().speakerByTheme[theme]
-    ?? voiceThemeOf(theme)?.defaultSpeaker
-    ?? settings().voiceName
+  // A stored '' (the retired 主题默认 option) reads as the theme default.
+  const storedSpeaker = settings().speakerByTheme[theme]
+  const current = (storedSpeaker === undefined || storedSpeaker === '')
+    ? (voiceThemeOf(theme)?.defaultSpeaker ?? settings().voiceName)
+    : storedSpeaker
   const lang = settings().voiceLang
   const options = speakersForTheme(theme, lang)
   const locked = phase === 'thinking' || phase === 'speaking'
@@ -600,13 +602,13 @@ function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => 
           ? [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))].map(group => (
             <optgroup key={group} label={group}>
               {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => (
-                <option key={option.id} value={option.id}>{option.label}</option>
+                <option key={option.id} value={option.id}>{option.label}{option.id === current ? '（默认）' : ''}</option>
               ))}
             </optgroup>
           ))
           : options.map(option => (
             <option key={option.id || '__default'} value={option.id}>
-              {'more' in option ? `更多 · ${option.label}` : option.label}
+              {option.label}{option.id === current ? '（默认）' : ''}
             </option>
           ))}
       </select>
