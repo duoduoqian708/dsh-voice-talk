@@ -116,6 +116,22 @@ const CSS = `
 .dsh-voice-print-thumb { display: block; width: 100%; }
 .dsh-voice-print-thumb svg { display: block; width: 100%; height: 44px; }
 
+/* 听 module's 试音 dialog: pulsing listen dot + rolling transcript box. */
+.dsh-voice-test-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: #34C759; margin-right: 6px; vertical-align: 1px;
+  animation: dsh-voice-pulse 1.4s ease-in-out infinite;
+}
+.dsh-voice-asr-test-text {
+  max-height: 240px; overflow-y: auto; min-height: 88px;
+  border: 1px solid rgba(0, 0, 0, .08); border-radius: 10px;
+  background: rgba(0, 0, 0, .02);
+  padding: 10px 12px; display: grid; gap: 6px; align-content: start;
+}
+.dsh-voice-asr-test-text p { margin: 0; font-size: 13px; line-height: 1.5; }
+.dsh-voice-asr-test-interim { opacity: .55; }
+.dsh-voice-asr-test-waiting { opacity: .4; }
+
 /* ---- settings card: provider settings modal ----
    Light panel, 24px radius, hairline shadow; dark adapts via the host's
    body[data-ds-dark-theme] attribute (the theme presenter sets it). */
@@ -183,6 +199,7 @@ body[data-ds-dark-theme] .dsh-voice-input { background: rgba(255, 255, 255, .06)
 body[data-ds-dark-theme] .dsh-voice-input:focus { border-color: rgba(255, 255, 255, .45); }
 body[data-ds-dark-theme] .dsh-voice-print-card { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .12); }
 body[data-ds-dark-theme] .dsh-voice-print-card:hover { border-color: rgba(255, 255, 255, .25); }
+body[data-ds-dark-theme] .dsh-voice-asr-test-text { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .04); }
 body[data-ds-dark-theme] .dsh-voice-switch { background: rgba(255, 255, 255, .2); }
 body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgba(0, 0, 0, .5) 0 0 1px 0, rgba(0, 0, 0, .4) 0 8px 24px 0; }
 /* call-overlay dark adaptations: hero key, markers, reasoning + tool cards */

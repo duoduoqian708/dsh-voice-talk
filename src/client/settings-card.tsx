@@ -4,10 +4,12 @@
 // field-by-field through the settings scope, revision-fenced by the wire.
 
 import type { ReactElement } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { VoiceSettings } from './voice-settings.ts'
 import { listVoiceThemes, speakersForTheme, voiceThemeOf, type VoiceTheme } from './voice-themes.ts'
+import { CloudRecognizer, type AsrVendor } from './asr.ts'
+import type { RecognitionHandle } from './speech.ts'
 
 /** Card state: the resolved section plus which fields the user overrode. */
 export interface VoiceCardState {
@@ -259,6 +261,7 @@ function AsrRow({
   const refs = ASR_CREDENTIAL_REFS[engine.id] ?? EMPTY_REFS
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [testOpen, setTestOpen] = useState(false)
 
   useEffect(() => {
     const cacheKey = `asr:${engine.id}`
@@ -295,10 +298,14 @@ function AsrRow({
           onClick={onActivate}>
           {active ? '已启用' : '启用'}
         </button>
+        <button type='button' className='dsh-voice-provider-btn' onClick={() => setTestOpen(true)}>
+          试音
+        </button>
         <button type='button' className='dsh-voice-provider-btn' onClick={() => setModalOpen(true)}>
           设置
         </button>
       </div>
+      {testOpen && <AsrTestModal engine={engine} value={value} onClose={() => setTestOpen(false)} />}
       {modalOpen && (
         <ProviderModal
           theme={pseudoTheme}
@@ -331,6 +338,71 @@ const ASR_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: string;
     { ref: 'VOICE_XF_API_SECRET', label: 'API Secret', mask: true },
     { ref: 'VOICE_XF_API_KEY', label: 'API Key', mask: true },
   ],
+}
+
+/** The 听 module's mic test: one standalone recognition session, transcript
+ *  streams into a read-only box; closing tears the session down for real
+ *  (socket closed, mic tracks stopped — the same stop discipline as the loop).
+ *  Credential/vendor failures surface here in plain text, so the settings
+ *  page can self-diagnose without a call. */
+function AsrTestModal({
+  engine, value, onClose,
+}: {
+  engine: { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }
+  value: Required<VoiceSettings>
+  onClose(): void
+}): ReactElement {
+  const [lines, setLines] = useState<string[]>([])
+  const [interim, setInterim] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const handleRef = useRef<RecognitionHandle | null>(null)
+
+  useEffect(() => {
+    const recognizer = new CloudRecognizer(engine.id as AsrVendor)
+    if (!recognizer.supported()) {
+      setError('此页面无法使用麦克风（需要 https 或本机 localhost 访问）')
+      return
+    }
+    handleRef.current = recognizer.start({
+      onInterim: setInterim,
+      onFinal: text => { setLines(list => [...list, text]); setInterim('') },
+      onSpeechActive: () => { /* the status line stays 监听中 for v1 */ },
+      onEnd: () => { /* unexpected drops re-arm inside the recognizer */ },
+      onError: (message, fatal) => { if (fatal) setError(message) },
+    }, {
+      // 所配即所测：弹窗里配的模型/端点/语言原样带进 hello 帧。
+      lang: value.voiceLang,
+      model: engine.id === 'qwen' ? value.asrQwenModel : undefined,
+      endpoint: engine.id === 'qwen' ? value.asrQwenEndpoint : value.asrXfyunEndpoint,
+    })
+    return () => {
+      handleRef.current?.stop()
+      handleRef.current = null
+    }
+  }, [engine.id, value.voiceLang, value.asrQwenModel, value.asrQwenEndpoint, value.asrXfyunEndpoint])
+
+  return (
+    <div className='dsh-voice-modal-veil' onClick={onClose}>
+      <div className='dsh-voice-modal' onClick={event => event.stopPropagation()}>
+        <div className='dsh-voice-modal-head'>
+          <h4 className='dsh-voice-modal-title'>{engine.label} · 试音</h4>
+          <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label='关闭'>✕</button>
+        </div>
+        {error !== null
+          ? <p className='dsh-voice-card-warn'>{error}</p>
+          : <p className='dsh-voice-setup-note'><i className='dsh-voice-test-dot' aria-hidden='true' />监听中 — 对着麦克风说话，文字出现在下方</p>}
+        <div className='dsh-voice-asr-test-text'>
+          {lines.map((line, i) => <p key={i}>{line}</p>)}
+          {interim !== '' && <p className='dsh-voice-asr-test-interim'>{interim}</p>}
+          {lines.length === 0 && interim === '' && error === null && <p className='dsh-voice-asr-test-waiting'>…</p>}
+        </div>
+        <div className='dsh-voice-modal-footer'>
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
+          {error === null && <span className='dsh-voice-setup-ok'>关闭即停止识别</span>}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** One engine row inside the unified panel: name + status + actions. */
