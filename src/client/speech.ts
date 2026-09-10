@@ -8,6 +8,8 @@ export interface RecognitionEvents {
   onInterim(text: string): void
   /** A finalized utterance (pause or hard stop ended it). */
   onFinal(text: string): void
+  /** Speech-activity transition from the mic RMS (drives the utterance cap). */
+  onSpeechActive(active: boolean): void
   /** The engine stopped on its own (silence, timeout, error). */
   onEnd(): void
   /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported). */
@@ -27,7 +29,7 @@ export interface Recognizer {
    * stay armed.
    */
   start(events: RecognitionEvents): RecognitionHandle | null
-  /** True when the browser exposes the SpeechRecognition constructor. */
+  /** True when the browser exposes mic capture and WebSocket transport. */
   supported(): boolean
 }
 
@@ -135,150 +137,6 @@ export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onIn
       }
     },
     finished,
-  }
-}
-
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike
-
-interface SpeechRecognitionLike {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  maxAlternatives: number
-  start(): void
-  stop(): void
-  abort(): void
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  onend: (() => void) | null
-  onerror: ((event: { error: string }) => void) | null
-}
-
-interface SpeechRecognitionEventLike {
-  resultIndex: number
-  results: ArrayLike<{
-    isFinal: boolean
-    length: number
-    [index: number]: { transcript: string }
-  }>
-}
-
-/** Window augmentation for the vendor-prefixed Web Speech constructor. */
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionCtor
-    webkitSpeechRecognition?: SpeechRecognitionCtor
-  }
-}
-
-/** Restart backoff after an unexpected engine disconnect. */
-const RESTART_BASE_MS = 250
-const RESTART_MAX_MS = 4000
-
-/**
- * Chrome SpeechRecognition wrapper. The engine auto-disconnects after every
- * finalized utterance or ~60s of silence; {@link start} arms auto-restart so
- * the caller experiences one continuous session.
- */
-export class ChromeRecognizer implements Recognizer {
-  #restarting = false
-  #restartAttempt = 0
-  #disposed = false
-  #restartTimer: ReturnType<typeof setTimeout> | null = null
-  /** The recognition instance currently alive. The onend auto-restart builds
-   *  a NEW one that the controller's handle can never know about, so stop()
-   *  must abort this "current" reference, not the handle's own closure. */
-  #recognition: SpeechRecognitionLike | null = null
-
-  supported(): boolean {
-    return typeof window !== 'undefined'
-      && (window.SpeechRecognition !== undefined || window.webkitSpeechRecognition !== undefined)
-  }
-
-  start(events: RecognitionEvents): RecognitionHandle | null {
-    this.#disposed = false
-    this.#restartAttempt = 0
-    const Ctor = typeof window !== 'undefined'
-      ? (window.SpeechRecognition ?? window.webkitSpeechRecognition)
-      : undefined
-    if (Ctor === undefined) {
-      events.onError('此浏览器不支持语音识别（需要 Chrome/Edge）', true)
-      return null
-    }
-    const recognition = new Ctor()
-    this.#recognition = recognition
-    recognition.lang = navigator.language?.startsWith('zh') ? 'zh-CN' : (navigator.language || 'zh-CN')
-    recognition.continuous = true
-    recognition.interimResults = true
-    recognition.maxAlternatives = 1
-
-    recognition.onresult = (event) => {
-      let interim = ''
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i]
-        const transcript = result[0]?.transcript ?? ''
-        if (result.isFinal) {
-          const text = transcript.trim()
-          if (text !== '') events.onFinal(text)
-        } else {
-          interim += transcript
-        }
-      }
-      events.onInterim(interim.trim())
-    }
-    recognition.onerror = (event) => {
-      // 'no-speech' and 'aborted' are normal pause artifacts; the rest may be
-      // transient (network) or fatal (not-allowed).
-      const error = event.error
-      if (error === 'no-speech' || error === 'aborted') return
-      const fatal = error === 'not-allowed' || error === 'service-not-allowed'
-      events.onError(`语音识别错误：${error}`, fatal)
-    }
-    recognition.onend = () => {
-      if (this.#restarting || this.#disposed) return
-      // Chrome ended us (silence/timeout): arm a restart with backoff so the
-      // session stays armed without a busy-fail loop when the mic is gone.
-      events.onEnd()
-      const delay = Math.min(RESTART_BASE_MS * 2 ** this.#restartAttempt, RESTART_MAX_MS)
-      this.#restartAttempt += 1
-      this.#restarting = true
-      this.#restartTimer = setTimeout(() => {
-        this.#restarting = false
-        this.#restartTimer = null
-        if (!this.#disposed) this.start(events)
-      }, delay)
-    }
-
-    try {
-      recognition.start()
-    } catch (error) {
-      // InvalidStateError: already running — harmless.
-      events.onError(String(error), false)
-      return null
-    }
-    const handle: RecognitionHandle = {
-      stop: () => {
-        this.#disposed = true
-        if (this.#restartTimer !== null) {
-          clearTimeout(this.#restartTimer)
-          this.#restartTimer = null
-        }
-        this.#restarting = false
-        try {
-          // abort(), not stop(): stop() flushes Chrome's recognition buffer as
-          // a final result — after a hang-up that tail would land in the
-          // composer and send. abort() discards the buffer silently.
-          // Abort the CURRENT instance: the onend auto-restart replaces the
-          // closed-over recognition with a newer one, and aborting the stale
-          // closure left the live mic capturing after a hang-up.
-          const live = this.#recognition
-          this.#recognition = null
-          live?.abort()
-        } catch {
-          // already stopped
-        }
-      },
-    }
-    return handle
   }
 }
 

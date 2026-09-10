@@ -50,7 +50,8 @@ interface QwenUpstreamHandlers {
   onError(message: string): void
 }
 
-async function resolveApiKey(ctx: Context): Promise<string> {
+/** Resolve the DashScope API key host-side (shared with the ASR bridge). */
+export async function resolveApiKey(ctx: Context): Promise<string> {
   const creds = ctx.get('credentials')
   if (creds === undefined) throw new Error('凭证服务不可用')
   const view = await creds.resolve(credentialRef('VOICE_QWEN_API_KEY')).catch(() => undefined)
@@ -89,8 +90,10 @@ type WireEvent = { type?: string; error?: { code?: string; message?: string }; d
  * deltas surface through `onAudio` as raw PCM bytes. Resolves once the
  * session accepts appends; rejects on handshake/auth failure.
  */
-function openUpstream(apiKey: string, params: QwenSessionParams, handlers: QwenUpstreamHandlers): Promise<QwenUpstream> {
-  const { WebSocket } = require('ws') as typeof import('ws')
+async function openUpstream(apiKey: string, params: QwenSessionParams, handlers: QwenUpstreamHandlers): Promise<QwenUpstream> {
+  // await import, NOT require('ws'): the node half ships as an ESM bundle
+  // and a plain require() there is an esbuild stub that throws at runtime.
+  const { WebSocket } = await import('ws')
   return new Promise<QwenUpstream>((resolveUp, rejectUp) => {
     let ready = false
     let ended = false
@@ -253,7 +256,6 @@ let clientWss: import('ws').WebSocketServer | null = null
  * JSON text frames; PCM returns as binary frames; `finished`/`error` as JSON.
  */
 export function registerQwenUpgrade(ctx: Context): WebUpgradeRoute {
-  console.error('[voice-talk] upgrade route /voice-tts/qwen created')
   return {
     path: '/voice-tts/qwen',
     handler: async (req: IncomingMessage, socket: Duplex, head: Buffer) => {

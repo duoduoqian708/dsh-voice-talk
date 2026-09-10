@@ -214,6 +214,66 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
   return {}
 }
 
+/** The listening engines: same credential refs as their 说 twins share. */
+const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[] }[] = [
+  { id: 'qwen', label: '千问听写', refs: ['VOICE_QWEN_API_KEY'] },
+  { id: 'xfyun', label: '讯飞听写', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'] },
+]
+
+/**
+ * One listening-engine row: pick the ASR engine the loop's recognizer uses.
+ * The credential status reads the same VOICE_* refs the 说 engines configure
+ * (one engine, two directions), so the check mirrors EngineRow's — session
+ * cache first, describe() IPC only when it misses.
+ */
+function AsrRow({
+  engine, value, credentials, refreshKey, disabled, onActivate,
+}: {
+  engine: { id: string; label: string; refs: readonly string[] }
+  value: Required<VoiceSettings>
+  credentials: VoiceCardProps['credentials']
+  refreshKey: number
+  disabled: boolean
+  onActivate(): void
+}): ReactElement {
+  const [configured, setConfigured] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    const cacheKey = `asr:${engine.id}`
+    const cached = configuredCache.get(cacheKey)
+    if (cached !== undefined) {
+      setConfigured(cached)
+      return
+    }
+    let alive = true
+    void credentials.describe({ refs: [...engine.refs] }).then(response => {
+      if (!alive || !response.result.ok) return
+      const list = response.result.value?.credentials ?? {}
+      const ok = engine.refs.every(ref => list[ref]?.configured === true)
+      configuredCache.set(cacheKey, ok)
+      if (alive) setConfigured(ok)
+    }).catch(() => { if (alive) setConfigured(false) })
+    return () => { alive = false }
+  }, [credentials, engine.id, engine.refs, refreshKey])
+
+  const active = value.asrTheme === engine.id
+  const statusWord = configured === null ? '检查凭证中…' : configured ? (active ? '当前启用' : '凭证已配置') : '凭证未配置'
+  return (
+    <button type='button' className='dsh-voice-engine-row' disabled={disabled} onClick={onActivate}>
+      <span className='dsh-voice-engine-info'>
+        <span className='dsh-voice-engine-line'>
+          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{engine.label}</span>
+          <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
+        </span>
+        {active && <span className='dsh-voice-engine-note'>说话限时 60 秒，停顿自动发送</span>}
+      </span>
+      <span className='dsh-voice-provider-actions'>
+        <span className={`dsh-voice-provider-btn${active ? ' is-primary' : ''}`}>{active ? '已启用' : '启用'}</span>
+      </span>
+    </button>
+  )
+}
+
 /** One engine row inside the unified panel: name + status + actions. */
 function EngineRow({
   theme, value, credentials, set, refreshKey, onActivate, onRefresh,
@@ -592,7 +652,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
 
         <div className='dsh-voice-panel-sec'>
-          <div className='dsh-voice-panel-title'>音色引擎</div>
+          <div className='dsh-voice-panel-title'>说 · 音色引擎</div>
           {listVoiceThemes().map(theme => (
             <EngineRow
               key={theme.id}
@@ -603,6 +663,23 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
               refreshKey={voicesTick}
               onActivate={() => { if (!disabled) set('ttsTheme', theme.id) }}
               onRefresh={() => { configuredCache.clear(); tickVoices(n => n + 1) }}
+            />
+          ))}
+        </div>
+
+        <div className='dsh-voice-panel-sep' aria-hidden='true' />
+
+        <div className='dsh-voice-panel-sec'>
+          <div className='dsh-voice-panel-title'>听 · 语音识别</div>
+          {ASR_ENGINES.map(engine => (
+            <AsrRow
+              key={engine.id}
+              engine={engine}
+              value={value}
+              credentials={credentials}
+              refreshKey={voicesTick}
+              disabled={disabled}
+              onActivate={() => { if (!disabled) set('asrTheme', engine.id) }}
             />
           ))}
         </div>

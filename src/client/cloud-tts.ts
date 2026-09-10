@@ -37,6 +37,9 @@ export class BridgeAudioTtsProvider implements TtsProvider {
   readonly id: string
   readonly #route: string
   #interrupt: (() => void) | null = null
+  /** Session created by the last startSession call — cancel() must reach it:
+   *  the controller's skip / barge-in / hang-up all cancel the provider. */
+  #activeSession: TtsSession | null = null
 
   constructor(id: string, route: string) {
     this.id = id
@@ -45,6 +48,12 @@ export class BridgeAudioTtsProvider implements TtsProvider {
 
   supported(): boolean {
     return typeof window !== 'undefined' && typeof Audio !== 'undefined'
+  }
+
+  /** Theme-private extras the route consumes (endpoint override), if any. */
+  #routeExtras(opts: SpeakOptions): Record<string, string> {
+    const endpoint = opts.params.endpoint ?? opts.params.xfyunEndpoint
+    return typeof endpoint === 'string' && endpoint !== '' ? { endpoint } : {}
   }
 
   speak(text: string, opts: SpeakOptions, onInterrupted: () => void): Promise<void> {
@@ -79,7 +88,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
         const response = await fetch(this.#route, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: chunks[index]!, voice: opts.voiceName, rate: opts.rate }),
+          body: JSON.stringify({ text: chunks[index]!, voice: opts.voiceName, rate: opts.rate, ...this.#routeExtras(opts) }),
         })
         if (!response.ok) {
           const body = (await response.json().catch(() => null)) as { error?: string } | null
@@ -149,13 +158,15 @@ export class BridgeAudioTtsProvider implements TtsProvider {
   /**
    * Streaming session: each pushed piece is fetched and played in order; the
    * fetch of piece N+1 runs while N plays (the queue order keeps audio
-   * gapless in practice — synthesis per ~100-char piece is fast).
+   * gapless in practice — synthesis per ~100-char piece is fast). Each piece
+   * reports the cumulative played count when it starts playing.
    */
-  startSession(opts: SpeakOptions, onInterrupted: () => void): TtsSession {
+  startSession(opts: SpeakOptions, onInterrupted: () => void, onProgress?: (playedChars: number) => void): TtsSession {
     const queue: string[] = []
     let ended = false
     let settled = false
     let busy = false
+    let played = 0
     let resolveDone: (() => void) | null = null
     let failDone: ((error: Error) => void) | null = null
     const finished = new Promise<void>((resolve, reject) => {
@@ -167,6 +178,8 @@ export class BridgeAudioTtsProvider implements TtsProvider {
       settled = true
       failDone?.(new Error(message))
     }
+    /** The chunk on the air; cancel() stops it mid-playback. */
+    let playing: { audio: HTMLAudioElement; url: string } | null = null
     const pump = (): void => {
       if (settled || busy) return
       const text = queue.shift()
@@ -183,28 +196,40 @@ export class BridgeAudioTtsProvider implements TtsProvider {
           const response = await fetch(this.#route, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, voice: opts.voiceName, rate: opts.rate }),
+            body: JSON.stringify({ text, voice: opts.voiceName, rate: opts.rate, ...this.#routeExtras(opts) }),
           })
           if (!response.ok) {
             const body = (await response.json().catch(() => null)) as { error?: string } | null
             throw new Error(body?.error ?? `语音桥请求失败（HTTP ${response.status}）`)
           }
           const url = URL.createObjectURL(await response.blob())
+          // A cancelled session must not still fire a chunk that was in flight.
+          if (settled) {
+            URL.revokeObjectURL(url)
+            busy = false
+            return
+          }
           const audio = new Audio()
           audio.src = url
+          playing = { audio, url }
+          played += text.length
+          onProgress?.(played)
           audio.onended = () => {
             URL.revokeObjectURL(url)
             busy = false
+            playing = null
             if (settled) return
             pump()
           }
           audio.onerror = () => {
             URL.revokeObjectURL(url)
             busy = false
+            playing = null
             if (!settled) settleFail('音频播放失败')
           }
           void audio.play().catch(error => {
             busy = false
+            playing = null
             if (!settled) settleFail(`音频播放失败：${error instanceof Error ? error.message : String(error)}`)
           })
         } catch (error) {
@@ -213,7 +238,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
         }
       })()
     }
-    return {
+    const session: TtsSession = {
       push: (text) => {
         if (settled || ended) return
         queue.push(text)
@@ -227,16 +252,27 @@ export class BridgeAudioTtsProvider implements TtsProvider {
         ended = true
         if (!settled) {
           settled = true
+          if (playing !== null) {
+            playing.audio.pause()
+            playing.audio.src = ''
+            URL.revokeObjectURL(playing.url)
+            playing = null
+          }
           resolveDone?.()
         }
       },
       finished,
     }
+    this.#activeSession = session
+    return session
   }
 
   cancel(): void {
     this.#interrupt?.()
     this.#interrupt = null
+    const session = this.#activeSession
+    this.#activeSession = null
+    session?.cancel()
   }
 }
 
@@ -353,13 +389,14 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     })
   }
 
-  startSession(opts: SpeakOptions, onInterrupted: () => void): TtsSession {
+  startSession(opts: SpeakOptions, onInterrupted: () => void, onProgress?: (playedChars: number) => void): TtsSession {
     let socket: WebSocket | null = null
     let player: PcmStreamPlayer | null = null
     let ended = false
     let settled = false
     let ready = false
     let sawAudio = false
+    let played = 0
     const pending: string[] = []
     let resolveDone: (() => void) | null = null
     let failDone: ((error: Error) => void) | null = null
@@ -456,9 +493,13 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       settleFail(`千问连接失败：${error instanceof Error ? error.message : String(error)}`)
     }
 
-    return {
+    const session: TtsSession = {
       push: (text) => {
         if (settled || ended || text === '') return
+        // Realtime synthesis starts on append; audio follows within a beat,
+        // so the push position is the marker (slightly leading the speaker).
+        played += text.length
+        onProgress?.(played)
         if (!ready || socket === null) {
           pending.push(text)
           return
@@ -475,6 +516,10 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       },
       finished,
     }
+    // Register on the provider so cancel() (skip / barge-in / hang-up) can
+    // reach a session the controller created directly.
+    this.#activeSession = session
+    return session
   }
 
   cancel(): void {

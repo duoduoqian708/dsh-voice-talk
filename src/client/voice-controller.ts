@@ -4,7 +4,10 @@
 // the composer tool row to arm the loop.
 //
 // Loop:
-//   listening --silence--> submit -> thinking --assistant message--> speaking --> (cooldown) --> listening
+//   listening --silence--> submit -> thinking --turn settled (running=false)--> speaking --> (cooldown) --> listening
+// Thinking spans the whole multi-step turn (prose, tool calls, more prose);
+// each step's text feeds the speaker as it streams, and the mic stays off
+// until the turn ends.
 // The microphone is armed during listening and, only when the user opted into
 // barge-in, during speaking; echo-guarded (speaker feed-back is dropped, real
 // speech interrupts) and paused while thinking. Failure policy: the loop
@@ -12,13 +15,15 @@
 
 import type { ConversationSnapshot, PartialAssistant } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TtsProvider, TtsSession } from './speech.ts'
-import { ChromeRecognizer, sessionFromSpeak } from './speech.ts'
-import { cleanForSpeech, extractReadout } from './readout.ts'
+import { sessionFromSpeak } from './speech.ts'
+import { CloudRecognizer } from './asr.ts'
+import { cleanForSpeech, cleanStreamProse } from './readout.ts'
+export { cleanStreamProse } from './readout.ts'
 import { looksLikeEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
-import type { TranscriptMessage, TranscriptState, VoiceStatus } from './types.ts'
+import type { TranscriptMessage, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 
 /** Shortest finalized utterance worth submitting (filters breaths and noise). */
 const MIN_UTTERANCE_CHARS = 2
@@ -28,10 +33,12 @@ const BARGE_IN_ARM_MS = 500
 const REARM_COOLDOWN_MS = 900
 /** Window after a readout during which re-armed listening still runs the echo guard. */
 const ECHO_TAIL_WINDOW_MS = 3_500
-/** Give up watching for a reply after this long (stuck turn, provider error). */
-const REPLY_TIMEOUT_MS = 120_000
+/** Give up watching for a reply after this long without snapshot progress. */
+const REPLY_TIMEOUT_MS = 180_000
 /** Minimum cleaned prose before a sentence boundary is worth a synthesis call. */
 const FLUSH_MIN_CHARS = 100
+/** Utterance cap: speaking this long without a pause forces a submit. */
+const UTTERANCE_CAP_MS = 60_000
 
 /** The input write path the controller submits through. */
 export interface InputWriteFace {
@@ -56,6 +63,7 @@ export interface VoiceControllerDeps {
 /** One finalized assistant message relevant to the readout chain. */
 export interface AssistantMessageRef {
   readonly seq: number
+  readonly turn: number
   readonly text: string
 }
 
@@ -68,18 +76,9 @@ function partialTextOf(partial: PartialAssistant): string {
 }
 
 /**
- * Stream-safe cleaner: like cleanForSpeech, but an UNCLOSED fenced code block
- * is swallowed whole (its content may still be arriving) instead of leaking
- * code into speech.
+ * Stream-safe cleaner lives in readout.ts now (shared with the karaoke
+ * marker); re-exported above for callers that imported it from here.
  */
-export function cleanStreamProse(raw: string): string {
-  const openFence = raw.lastIndexOf('```')
-  const closedFences = (raw.match(/```/g) ?? []).length
-  let safe = raw
-  if (closedFences % 2 === 1 && openFence >= 0) safe = raw.slice(0, openFence)
-  // The newline-collapsed tail often ends in a dangling pause; trim it.
-  return cleanForSpeech(safe).replace(/[，,、]+$/, '')
-}
 
 /** Index just past the last sentence boundary, or null when none. */
 export function lastSentenceBoundary(text: string): number | null {
@@ -98,7 +97,7 @@ export function assistantMessagesOf(snapshot: ConversationSnapshot): readonly As
       .filter(block => block.kind === 'text')
       .map(block => (block as { kind: 'text'; text: string }).text)
       .join('\n')
-    messages.push({ seq: node.seq, text })
+    messages.push({ seq: node.seq, turn: node.turn, text })
   }
   return messages
 }
@@ -116,35 +115,117 @@ function nodeText(blocks: readonly { kind: string; text?: string }[]): string {
     .join('')
 }
 
-/** Transcript slice of a snapshot: finalized user/assistant messages + partial. */
-export function transcriptOf(snapshot: ConversationSnapshot): TranscriptState {
-  const messages: TranscriptMessage[] = []
+/** Tool result preview cap — result bodies can dwarf the whole stream. */
+const RESULT_PREVIEW_CHARS = 240
+
+/** Block mirror of one assistant step (reasoning / prose / tool calls). */
+function segmentsOfBlocks(blocks: readonly unknown[]): TranscriptSegment[] {
+  const out: TranscriptSegment[] = []
+  for (const block of blocks) {
+    const candidate = block as { kind?: string; text?: string; name?: string; argsRaw?: string }
+    if (candidate.kind === 'text' && candidate.text !== undefined && candidate.text !== '') {
+      out.push({ kind: 'text', text: candidate.text })
+    } else if (candidate.kind === 'reasoning' && candidate.text !== undefined && candidate.text !== '') {
+      out.push({ kind: 'reasoning', text: candidate.text })
+    } else if (candidate.kind === 'tool-call' && candidate.name !== undefined && candidate.name !== '') {
+      out.push({ kind: 'tool-call', name: candidate.name, args: candidate.argsRaw ?? '' })
+    }
+  }
+  return out
+}
+
+/** Text blocks of a tool result, capped to a preview. */
+function resultText(content: readonly unknown[]): string {
+  const text = nodeText(content as readonly { kind: string; text?: string }[])
+  return text.length > RESULT_PREVIEW_CHARS ? `${text.slice(0, RESULT_PREVIEW_CHARS)}…` : text
+}
+
+function sameSegment(a: TranscriptSegment, b: TranscriptSegment): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'text' || a.kind === 'reasoning') {
+    return a.text === (b as typeof a).text
+  }
+  if (a.kind === 'tool-call') {
+    const other = b as typeof a
+    return a.name === other.name && a.args === other.args
+  }
+  const other = b as typeof a
+  return a.name === other.name && a.ok === other.ok && a.text === other.text
+}
+
+function sameSegments(a: readonly TranscriptSegment[], b: readonly TranscriptSegment[]): boolean {
+  return a.length === b.length && a.every((segment, i) => sameSegment(segment, b[i]!))
+}
+
+/** Joined prose of a turn's text segments (the readout/karaoke base). */
+function proseOf(segments: readonly TranscriptSegment[]): string {
+  return segments
+    .filter((segment): segment is { kind: 'text'; text: string } => segment.kind === 'text')
+    .map(segment => segment.text)
+    .join('\n\n')
+}
+
+function sameTools(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i])
+}
+
+/**
+ * Transcript slice of a snapshot: finalized user/assistant messages + partial.
+ * Pass `prev` to reuse its message objects wherever value-equal: the store's
+ * change gate (reference compare) then stays closed for unchanged messages,
+ * and memoized rows skip re-rendering while the partial streams.
+ */
+export function transcriptOf(snapshot: ConversationSnapshot, prev?: TranscriptState): TranscriptState {
+  const candidate: TranscriptMessage[] = []
   for (const node of snapshot.nodes) {
     if (node.kind === 'user') {
-      messages.push({
-        seq: node.seq, turn: -1, role: 'user',
-        text: nodeText(node.content as unknown as readonly { kind: string; text?: string }[]),
-      })
+      const text = nodeText(node.content as unknown as readonly { kind: string; text?: string }[])
+      candidate.push({ seq: node.seq, turn: -1, role: 'user', text, segments: [{ kind: 'text', text }] })
     } else if (node.kind === 'assistant') {
       // One turn often emits several assistant nodes (prose, tool-call
       // interludes, retry outputs); the native stream reads them as ONE
       // message. Fold consecutive same-turn nodes so the stream shows a
       // single avatar + bubble per turn instead of one per node.
-      const last = messages[messages.length - 1]
-      const text = nodeText(node.blocks)
+      const last = candidate[candidate.length - 1]
+      const segments = segmentsOfBlocks(node.blocks as readonly unknown[])
       if (last !== undefined && last.role === 'assistant' && last.turn === node.turn) {
-        messages[messages.length - 1] = {
-          ...last,
-          text: last.text === '' ? text : last.text.endsWith('\n') ? last.text + text : `${last.text}\n\n${text}`,
+        if (segments.length > 0) {
+          const merged = [...last.segments, ...segments]
+          candidate[candidate.length - 1] = { ...last, segments: merged, text: proseOf(merged) }
         }
       } else {
-        messages.push({ seq: node.seq, turn: node.turn, role: 'assistant', text })
+        candidate.push({ seq: node.seq, turn: node.turn, role: 'assistant', text: proseOf(segments), segments })
+      }
+    } else if (node.kind === 'tool-result') {
+      // A result pairs with its call head (seq order guarantees the
+      // pairing); surface it as a segment on the turn it belongs to.
+      const name = node.call?.name ?? node.callId
+      const last = candidate[candidate.length - 1]
+      if (name !== '' && last !== undefined && last.role === 'assistant') {
+        const segment: TranscriptSegment = { kind: 'tool-result', name, ok: !node.isError, text: resultText(node.content as readonly unknown[]) }
+        candidate[candidate.length - 1] = { ...last, segments: [...last.segments, segment] }
       }
     }
   }
   const partial = snapshot.partial
-  const streaming = partial === null ? '' : partialTextOf(partial)
-  return { messages, streaming, pending: snapshot.pending.length }
+  const streaming = partial === null ? [] : segmentsOfBlocks(partial.blocks as readonly unknown[])
+  const runningTools = [...new Set(snapshot.runningCalls.map(call => call.name))]
+  const pending = snapshot.pending.length
+  const messages = candidate.map((message, i) => {
+    const before = prev?.messages[i]
+    return before !== undefined
+      && before.seq === message.seq && before.turn === message.turn && before.role === message.role
+      && before.text === message.text && sameSegments(before.segments, message.segments)
+      ? before
+      : message
+  })
+  if (prev !== undefined
+    && prev.messages.length === messages.length && prev.messages.every((message, i) => message === messages[i])
+    && sameSegments(prev.streaming, streaming) && prev.pending === pending
+    && sameTools(prev.runningTools, runningTools)) {
+    return prev
+  }
+  return { messages, streaming, pending, runningTools }
 }
 
 /** Theme-private params a session rides (model/endpoint overrides included). */
@@ -163,17 +244,22 @@ const SESSION_BASE_RATE = 1.0
 export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
-    pendingCount: 0, error: null,
+    pendingCount: 0, error: null, micMuted: false, spokenTurn: null, spokenChars: 0,
+    utteranceStartAt: null,
   })
 
   /** The session's message stream for the call overlay's right-hand column. */
   readonly transcript = new SnapshotStore<TranscriptState>({
-    messages: [], streaming: '', pending: 0,
+    messages: [], streaming: [], pending: 0, runningTools: [],
   })
 
   readonly #deps: VoiceControllerDeps
-  readonly #recognizer = new ChromeRecognizer()
-  #recognitionHandle: ReturnType<ChromeRecognizer['start']> = null
+  /** ASR engine cache (one live recognizer per configured vendor). */
+  #asrCache: { id: string; recognizer: CloudRecognizer } | null = null
+  #recognitionHandle: ReturnType<CloudRecognizer['start']> = null
+  /** Speech-start epoch of the current utterance (drives the 60s cap UI). */
+  #utteranceStartAt: number | null = null
+  #utteranceTimer: ReturnType<typeof setTimeout> | null = null
   #silenceTimer: ReturnType<typeof setTimeout> | null = null
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
   #replyTimer: ReturnType<typeof setTimeout> | null = null
@@ -192,6 +278,12 @@ export class VoiceController {
   #session: TtsSession | null = null
   #streamRaw = ''
   #streamFed = 0
+  /** Whether the watched turn has shown any life (running, partial, message). */
+  #sawTurnActivity = false
+  /** Turn id the karaoke marker points at (set as the flushes happen). */
+  #spokenTurnId: number | null = null
+  /** Bumped per submitted round; a settle from a superseded round is inert. */
+  #roundToken = 0
   /** Session-scoped rate override (null = SESSION_BASE_RATE); survives hang-ups. */
   #sessionRate: number | null = null
   /** Session-scoped speaker override (null = theme default); survives hang-ups. */
@@ -218,11 +310,9 @@ export class VoiceController {
 
   /** Rebuild the transcript store from the current snapshot (change-gated). */
   #syncTranscript(): void {
-    const next = transcriptOf(this.#deps.readSnapshot())
     const prev = this.transcript.getSnapshot()
-    if (prev.streaming === next.streaming && prev.pending === next.pending
-      && prev.messages.length === next.messages.length
-      && prev.messages.every((m, i) => m === next.messages[i])) return
+    const next = transcriptOf(this.#deps.readSnapshot(), prev)
+    if (next === prev) return
     this.transcript.set(next)
   }
 
@@ -237,7 +327,30 @@ export class VoiceController {
   /** Leave any voice activity: stop everything and go idle (pure off switch). */
   stopVoice(): void {
     this.#disarmAll()
-    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '' })
+    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', micMuted: false, spokenTurn: null, spokenChars: 0, utteranceStartAt: null })
+  }
+
+  /**
+   * Toggle in-call mic mute: capture stops (system recording indicator off),
+   * the call itself stays armed — unmuting re-arms recognition where the loop
+   * currently is (listening, or speaking with barge-in opted in).
+   */
+  toggleMute(): void {
+    if (this.status.getSnapshot().mode !== 'loop') return
+    const muted = !this.status.getSnapshot().micMuted
+    this.status.patch({ micMuted: muted, interim: '' })
+    if (muted) {
+      this.#clearUtterance()
+      this.#recognitionHandle?.stop()
+      this.#recognitionHandle = null
+      this.#pendingFinal = null
+      if (this.#silenceTimer !== null) {
+        clearTimeout(this.#silenceTimer)
+        this.#silenceTimer = null
+      }
+    } else if (this.#rearmListeningAfterMute()) {
+      this.#startRecognition()
+    }
   }
 
   /**
@@ -259,15 +372,24 @@ export class VoiceController {
    * override replaces `rate` outright (base is the constant 1.0, stored
    * values are never read), and the speaker override is folded into
    * `speakerByTheme[theme]` so every existing read path picks it up.
+   * A theme's default speaker fills an unset entry too: without it the
+   * readout chain sends an empty voice name and cloud vendors reject the
+   * whole synthesis (the settings-page try-listen never sees this because
+   * it applies the default itself).
    * The readout chain and the HUD readouts both go through here.
    */
   effectiveSettings(): Required<VoiceSettings> {
     const resolved = resolveSettings(this.#deps.settings())
-    const speaker = this.#sessionSpeaker ?? resolved.speakerByTheme[resolved.ttsTheme] ?? ''
+    const speakerByTheme = { ...resolved.speakerByTheme }
+    const themeDefault = voiceThemeOf(resolved.ttsTheme)?.defaultSpeaker
+    if (themeDefault !== undefined && speakerByTheme[resolved.ttsTheme] === undefined) {
+      speakerByTheme[resolved.ttsTheme] = themeDefault
+    }
+    const speaker = this.#sessionSpeaker ?? speakerByTheme[resolved.ttsTheme] ?? ''
     return {
       ...resolved,
       rate: this.#sessionRate ?? SESSION_BASE_RATE,
-      speakerByTheme: speaker === '' ? resolved.speakerByTheme : { ...resolved.speakerByTheme, [resolved.ttsTheme]: speaker },
+      speakerByTheme: speaker === '' ? speakerByTheme : { ...speakerByTheme, [resolved.ttsTheme]: speaker },
     }
   }
 
@@ -289,16 +411,19 @@ export class VoiceController {
   /** Start the engine with handlers routed by the current phase. */
   #startRecognition(): void {
     if (this.#disposed) return
+    if (this.status.getSnapshot().micMuted) return
     if (this.#recognitionHandle !== null) return
-    if (!this.#recognizer.supported()) {
-      this.#notifyError('此浏览器不支持语音识别（需要 Chrome/Edge）')
+    const recognizer = this.#recognizerFor()
+    if (!recognizer.supported()) {
+      this.#notifyError('此浏览器不支持语音采集（需要麦克风与 WebSocket）')
       this.#degradeToIdle()
       return
     }
-    this.#recognitionHandle = this.#recognizer.start({
+    this.#recognitionHandle = recognizer.start({
       onInterim: interim => this.status.patch({ interim }),
       onFinal: text => this.#onFinalUtterance(text),
-      onEnd: () => { /* the recognizer restarts itself */ },
+      onSpeechActive: active => this.#onSpeechActive(active),
+      onEnd: () => { /* the recognizer reconnects itself */ },
       onError: (message, fatal) => {
         if (fatal) {
           this.#notifyError(message)
@@ -307,6 +432,44 @@ export class VoiceController {
       },
     })
     if (this.#recognitionHandle === null) this.#degradeToIdle()
+  }
+
+  /**
+   * The recognizer the settings' 听 engine selects (one cached instance per
+   * vendor; the bridge surfaces missing credentials as a fatal error itself).
+   */
+  #recognizerFor(): CloudRecognizer {
+    const vendor = resolveSettings(this.#deps.settings()).asrTheme === 'xfyun' ? 'xfyun' : 'qwen'
+    if (this.#asrCache !== null && this.#asrCache.id === vendor) return this.#asrCache.recognizer
+    const recognizer = new CloudRecognizer(vendor)
+    this.#asrCache = { id: vendor, recognizer }
+    return recognizer
+  }
+
+  /** Speech-activity transition: the first onset opens the 60s cap window. */
+  #onSpeechActive(active: boolean): void {
+    if (!active) return
+    const snap = this.status.getSnapshot()
+    if (this.#disposed || snap.mode !== 'loop' || snap.micMuted) return
+    if (snap.phase !== 'listening' || this.#utteranceStartAt !== null) return
+    const startAt = Date.now()
+    this.#utteranceStartAt = startAt
+    this.status.patch({ utteranceStartAt: startAt })
+    this.#utteranceTimer = setTimeout(() => {
+      this.#utteranceTimer = null
+      // Cap reached: force the turn out even if the user keeps talking.
+      this.#flushPending()
+    }, UTTERANCE_CAP_MS)
+  }
+
+  /** Close the cap window (submit, mute, hang-up, phase leave all land here). */
+  #clearUtterance(): void {
+    if (this.#utteranceTimer !== null) {
+      clearTimeout(this.#utteranceTimer)
+      this.#utteranceTimer = null
+    }
+    this.#utteranceStartAt = null
+    this.status.patch({ utteranceStartAt: null })
   }
 
   #armListening(): void {
@@ -333,6 +496,7 @@ export class VoiceController {
     // Guard every entry: a late final can arrive after the loop is gone
     // (abort races, timeout degrade) — it must never reach the composer.
     if (this.status.getSnapshot().mode !== 'loop') return
+    if (this.status.getSnapshot().micMuted) return
     if (this.#speaking) {
       const settings = resolveSettings(this.#deps.settings())
       const armed = settings.allowInterrupt
@@ -400,6 +564,8 @@ export class VoiceController {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
     }
+    // The utterance window closes whatever flushed it (silence, the 60s cap).
+    this.#clearUtterance()
     const text = this.#pendingFinal
     this.#pendingFinal = null
     // The flush timer can outlive a hang-up by a beat; never submit then.
@@ -414,10 +580,12 @@ export class VoiceController {
     // The mic pauses while the agent works; it re-arms after the readout.
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
+    this.#clearUtterance()
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
     }
+    this.#roundToken += 1
     this.status.patch({ interim: '', caption: '', lastPrompt: text, phase: 'thinking' })
     this.#deps.input.setDraft(text)
     this.#deps.input.submit()
@@ -426,53 +594,81 @@ export class VoiceController {
   }
 
   /**
-   * Subscribe to the reply stream: partial text feeds the speaker sentence by
-   * sentence (instant readout), and the finalized message flushes the tail.
-   * A stuck turn must not trap the loop (timeout keeps the fallback).
+   * Subscribe to the reply stream. A turn often runs several steps (prose,
+   * tool calls, more prose): partial text feeds the speaker sentence by
+   * sentence as each step streams, every finalized step flushes its
+   * authoritative text, and the session closes only when the TURN ends
+   * (`running` falls false) — never on the first step. A stuck turn must
+   * not trap the loop (timeout keeps the fallback).
    */
   #watchForReply(): void {
     this.#unsubscribeSnapshot?.()
+    this.#sawTurnActivity = false
     this.#unsubscribeSnapshot = this.#deps.subscribeSnapshot(() => this.#onSnapshotStream())
+    this.#bumpReplyTimer()
+    queueMicrotask(() => this.#onSnapshotStream())
+  }
+
+  /** Reset the stuck-turn timer; snapshot progress keeps a slow turn alive. */
+  #bumpReplyTimer(): void {
+    if (this.#replyTimer !== null) clearTimeout(this.#replyTimer)
     this.#replyTimer = setTimeout(() => {
       if (this.#disposed || this.status.getSnapshot().phase !== 'thinking') return
       this.#teardownReplyWatch()
       this.#notifyError('回复等待超时')
       this.#finishRound()
     }, REPLY_TIMEOUT_MS)
-    queueMicrotask(() => this.#onSnapshotStream())
   }
 
   /** Stream tick: feed new cleaned prose to the speaker, flush sentence-wise. */
   #onSnapshotStream(): void {
     if (this.#disposed) return
+    if (this.status.getSnapshot().phase !== 'thinking') return
     const snapshot = this.#deps.readSnapshot()
-    // Tail flush: the turn ended while we were streaming.
-    if (this.status.getSnapshot().phase === 'thinking') {
-      const partial = snapshot.partial
-      const prose = partial === null ? '' : partialTextOf(partial)
-      if (partial !== null && prose.length > this.#streamRaw.length) {
+    const fresh = assistantMessagesOf(snapshot).filter(m => m.seq > this.#lastSpokenSeq)
+    if (fresh.length > 0 || snapshot.partial !== null || snapshot.running) this.#sawTurnActivity = true
+    // Live partial of the in-flight step feeds the speaker sentence by sentence.
+    const partial = snapshot.partial
+    if (partial !== null) {
+      this.#spokenTurnId = partial.turn
+      const prose = partialTextOf(partial)
+      if (prose.length > this.#streamRaw.length) {
         this.#streamRaw = prose
         this.#flushStreamSentences(false)
       }
     }
-    const messages = assistantMessagesOf(snapshot)
-    const latest = messages[messages.length - 1]
-    if (latest === undefined || latest.seq <= this.#lastSpokenSeq) return
-    // Finalized: flush the remaining tail and close the session.
-    this.#lastSpokenSeq = latest.seq
-    this.#teardownReplyWatch()
-    void this.#finishStream(latest.text)
+    // Finalized steps flush their authoritative text (the partial may lag),
+    // then the offsets reset so the next step starts from zero.
+    for (const message of fresh) {
+      this.#lastSpokenSeq = message.seq
+      this.#spokenTurnId = message.turn
+      if (message.text !== '') {
+        this.#streamRaw = message.text
+      }
+      // A step that finalizes without its own text still flushes whatever
+      // the partial streamed (aborted drafts, fold quirks) — never drop it.
+      this.#flushStreamSentences(true)
+      this.#streamRaw = ''
+      this.#streamFed = 0
+    }
+    // Turn settled: close the session, play the tail, hand back to listening.
+    if (this.#sawTurnActivity && !snapshot.running) {
+      this.#teardownReplyWatch()
+      void this.#settleTurn()
+      return
+    }
+    this.#bumpReplyTimer()
   }
 
   /**
    * Push every complete sentence beyond the fed offset to the session.
-   * `final` flushes the partial tail as well (end of generation).
-   * Every pushed piece is also accumulated into #spokenText: the echo guard
-   * needs to know what is being said RIGHT NOW, or barge-in-era feedback
-   * sails through and the loop self-excites.
+   * `final` flushes the partial tail as well (end of step). Offsets live in
+   * CLEANED-character space of the current step's raw text. Every pushed
+   * piece is also accumulated into #spokenText: the echo guard needs to know
+   * what is being said RIGHT NOW, or barge-in-era feedback sails through and
+   * the loop self-excites.
    */
   #flushStreamSentences(final: boolean): void {
-    const settings = resolveSettings(this.#deps.settings())
     const cleaned = cleanStreamProse(this.#streamRaw)
     if (cleaned.length <= this.#streamFed) return
     const pending = cleaned.slice(this.#streamFed)
@@ -485,17 +681,24 @@ export class VoiceController {
     this.#session?.push(piece)
   }
 
-  /** End-of-turn: flush the tail, close the session, hand back to listening. */
-  async #finishStream(finalText: string): Promise<void> {
+  /** End of turn: flush any tail still held by the partial, then settle. */
+  async #settleTurn(): Promise<void> {
+    if (this.#disposed) return
+    const token = this.#roundToken
     const settings = resolveSettings(this.#deps.settings())
     const session = this.#session
+    // The fold of the last in-flight step may land after `running` fell; the
+    // partial still holds its text, so flush that remainder before closing.
+    const partial = this.#deps.readSnapshot().partial
+    if (partial !== null && session !== null) {
+      const prose = partialTextOf(partial)
+      if (prose.length > this.#streamRaw.length) this.#streamRaw = prose
+      this.#flushStreamSentences(true)
+    }
     if (session === null) {
       this.#finishRound()
       return
     }
-    // The finalized text is authoritative (snapshot fold may lag the partial).
-    this.#streamRaw = finalText
-    this.#flushStreamSentences(true)
     this.status.patch({ phase: 'speaking' })
     this.#speaking = true
     this.#speakingSince = Date.now()
@@ -503,13 +706,14 @@ export class VoiceController {
     if (settings.allowInterrupt) this.#startRecognition()
     try {
       await session.finished
-      this.#endSpeaking()
-      this.#finishRound()
     } catch (error) {
-      this.#endSpeaking()
       this.#notifyError(error instanceof Error ? error.message : String(error))
-      this.#finishRound()
     }
+    // A barge-in may have submitted a newer round while we waited; that
+    // round owns the loop now and a stale settle must not re-arm over it.
+    if (token !== this.#roundToken) return
+    this.#endSpeaking()
+    this.#finishRound()
   }
 
   #teardownReplyWatch(): void {
@@ -530,51 +734,21 @@ export class VoiceController {
     this.#spokenText = ''
     this.#spokenTail = null
     this.#spokenTailUntil = 0
+    this.#spokenTurnId = null
+    this.status.patch({ spokenTurn: null, spokenChars: 0 })
     const provider = this.#speaker()
     if (!provider.supported()) return
     const speaker = settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName
-    this.#session = (provider.startSession ?? ((o, i) => sessionFromSpeak(provider, o, i)))(
-      { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) },
-      () => { /* interrupted: the recognizer's next final drives the loop */ },
-    )
-  }
-
-  /**
-   * Fallback readout: the streaming session produced nothing (theme without
-   * support, no prose streamed) but the reply has text — speak it whole.
-   */
-  async #speakReply(replyText: string): Promise<void> {
-    const settings = this.effectiveSettings()
-    const status = this.status.getSnapshot()
-    const readout = extractReadout(replyText, settings.maxReadoutChars)
-    const provider = this.#speaker()
-    if (readout === '' || !provider.supported() || this.#session !== null) {
-      return
-    }
-    this.status.patch({ phase: 'speaking', caption: readout })
-    this.#speaking = true
-    this.#speakingSince = Date.now()
-    this.#spokenText = readout
-    if (settings.allowInterrupt) this.#startRecognition()
     try {
-      await provider.speak(
-        readout,
-        { rate: settings.rate, lang: settings.voiceLang, voiceName: settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName, params: themeParams(settings) },
+      this.#session = (provider.startSession ?? ((o, i, p) => sessionFromSpeak(provider, o, i, p)))(
+        { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) },
         () => { /* interrupted: the recognizer's next final drives the loop */ },
+        chars => this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: chars }),
       )
-      this.#endSpeaking()
-      this.#finishRound()
     } catch (error) {
-      this.#endSpeaking()
-      if (error instanceof Error && error.message === 'interrupted') {
-        if (this.status.getSnapshot().phase === 'speaking') this.#finishRound()
-        return
-      }
       this.#notifyError(error instanceof Error ? error.message : String(error))
-      this.#finishRound()
     }
   }
-
 
   #endSpeaking(): void {
     this.#speaking = false
@@ -588,7 +762,7 @@ export class VoiceController {
     if (mode !== 'loop') {
       this.#recognitionHandle?.stop()
       this.#recognitionHandle = null
-      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '' })
+      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', spokenTurn: null, spokenChars: 0, utteranceStartAt: null })
       return
     }
     // Cooldown: let the speaker tail decay, then listen again. The tail of
@@ -610,6 +784,8 @@ export class VoiceController {
       this.#rearmTimer = null
       this.#armListening()
     }, REARM_COOLDOWN_MS)
+    // The round's readout is over: drop the karaoke marker.
+    this.status.patch({ spokenTurn: null, spokenChars: 0 })
   }
 
   // ---- helpers -------------------------------------------------------------
@@ -633,6 +809,7 @@ export class VoiceController {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#speaker().cancel()
+    this.#clearUtterance()
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
@@ -655,5 +832,7 @@ export class VoiceController {
     this.#spokenTail = null
     this.#spokenTailUntil = 0
     this.#pendingFinal = null
+    this.#sawTurnActivity = false
+    this.#spokenTurnId = null
   }
 }

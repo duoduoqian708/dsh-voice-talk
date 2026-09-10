@@ -188,6 +188,8 @@ body[data-ds-dark-theme] .dsh-voice-modal { background: #1C2230; box-shadow: rgb
 /* call-overlay dark adaptations: hero key, markers, reasoning + tool cards */
 body[data-ds-dark-theme] .dsh-voice-mickey { background: #232A3B; border-color: rgba(255, 255, 255, .12); color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-mickey[data-muted='true'] { color: #FF6961; border-color: rgba(255, 105, 97, .45); }
+body[data-ds-dark-theme] .dsh-voice-mic-ring circle { stroke: rgba(255, 105, 97, .6); }
+body[data-ds-dark-theme] .dsh-voice-countdown { color: #FF6961; }
 body[data-ds-dark-theme] .dsh-voice-marked { background: rgba(106, 184, 255, .16); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head { color: rgba(230, 237, 247, .55); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head:hover { color: #E6EDF7; }
@@ -299,6 +301,32 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-mickey:hover { filter: brightness(.97); }
 .dsh-voice-mickey:active { filter: brightness(.94); }
 .dsh-voice-mickey[data-muted='true'] { color: #FF3B30; border-color: rgba(255, 59, 48, .35); }
+
+/* 60s utterance cap: depleting ring around the mic key (erodes clockwise
+   from 12 o'clock while the user speaks) + the last-ten-seconds flicker. */
+.dsh-voice-mic-ring {
+  position: absolute; inset: -4px;
+  z-index: 2; pointer-events: none;
+}
+.dsh-voice-mic-ring circle {
+  fill: none;
+  stroke: rgba(255, 59, 48, .6);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.dsh-voice-countdown {
+  margin: 0 0 4px;
+  text-align: center;
+  font-size: 20px; font-weight: 600; line-height: 1.2;
+  color: #FF3B30;
+  font-variant-numeric: tabular-nums;
+}
+.dsh-voice-countdown-num { display: inline-block; animation: dsh-voice-pop .8s ease both; }
+@keyframes dsh-voice-pop {
+  0% { transform: scale(1.7); opacity: 0; }
+  35% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 
 .dsh-voice-state-word {
   margin-top: 14px;

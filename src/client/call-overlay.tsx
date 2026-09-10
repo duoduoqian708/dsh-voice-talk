@@ -45,7 +45,7 @@ export interface CallOverlayProps {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live resolved settings (rate/voiceName read here per render). */
-  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
+  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
 }
 
 const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
@@ -53,6 +53,59 @@ const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
   listening: '聆听中',
   thinking: '思考中',
   speaking: '播报中',
+}
+
+/** Utterance cap (mirrors the controller): the window forced out at this age. */
+const UTTERANCE_CAP_MS = 60_000
+/** Countdown becomes visible in the final stretch of the cap window. */
+const COUNTDOWN_VISIBLE_MS = 10_000
+
+/**
+ * The 60s utterance-cap ring: a stroke circle around the mic key that erodes
+ * clockwise from 12 o'clock while the utterance runs; gone = force submit.
+ */
+function MicRing({ startAt }: { startAt: number | null }): ReactElement | null {
+  const ringRef = useRef<SVGCircleElement | null>(null)
+  useEffect(() => {
+    if (startAt === null) return
+    const circumference = 2 * Math.PI * 36
+    let raf = 0
+    const frame = (): void => {
+      raf = requestAnimationFrame(frame)
+      const progress = Math.min(1, Math.max(0, (Date.now() - startAt) / UTTERANCE_CAP_MS))
+      if (ringRef.current !== null) ringRef.current.style.strokeDashoffset = String(progress * circumference)
+    }
+    raf = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(raf)
+  }, [startAt])
+  if (startAt === null) return null
+  const circumference = 2 * Math.PI * 36
+  return (
+    <svg className='dsh-voice-mic-ring' viewBox='0 0 80 80' aria-hidden='true'>
+      <circle ref={ringRef} cx='40' cy='40' r='36' strokeDasharray={circumference} strokeDashoffset={0}
+        transform='rotate(-90 40 40)' />
+    </svg>
+  )
+}
+
+/** The cap's last ten seconds: one number popping each second, then silence. */
+function ListenCountdown({ startAt, visible }: { startAt: number | null; visible: boolean }): ReactElement | null {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (startAt === null) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 100)
+    return () => clearInterval(id)
+  }, [startAt])
+  if (startAt === null || !visible) return null
+  const remaining = Math.max(0, UTTERANCE_CAP_MS - (now - startAt))
+  if (remaining > COUNTDOWN_VISIBLE_MS) return null
+  const sec = Math.max(1, Math.ceil(remaining / 1000))
+  return (
+    <div className='dsh-voice-countdown' role='timer' aria-label='说话限时倒计时'>
+      <span key={sec} className='dsh-voice-countdown-num'>{sec}</span>
+    </div>
+  )
 }
 
 /** No-op store fallbacks for overlays mounted without a transcript source. */
@@ -97,7 +150,7 @@ function PhoneGlyph(): ReactElement {
  * The wave slot itself is owned by the settings' voice-print: a lottie
  * preset ('equalizer' | 'wave') or the legacy mic-reactive bars fallback.
  */
-function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: VoiceSelectorHook; toggleMute(): void; phase: VoiceStatus['phase']; muted: boolean; waveStyle: string }): ReactElement {
+function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt }: { useVoice: VoiceSelectorHook; toggleMute(): void; phase: VoiceStatus['phase']; muted: boolean; waveStyle: string; utteranceStartAt: number | null }): ReactElement {
   const breathRef = useRef<CallBreath | null>(null)
   const printRef = useRef<WavePrint | null>(null)
   const whaleRef = useRef<HTMLDivElement | null>(null)
@@ -149,6 +202,7 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: Voi
       <div className='dsh-voice-wave' ref={waveRef} aria-hidden='true' />
 
       <div className='dsh-voice-mic-wrap'>
+        <MicRing startAt={phase === 'listening' && !muted ? utteranceStartAt : null} />
         <button
           type='button'
           className='dsh-voice-mickey'
@@ -385,13 +439,15 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const ss = String(elapsed % 60).padStart(2, '0')
   const rate = settings().rate
   const waveStyle = settings().waveStyle
+  const utteranceStartAt = useVoice(s => s.utteranceStartAt)
 
   return createPortal(
     <div className={`dsh-voice-call${collapsed ? ' is-collapsed' : ''}`} data-phase={phase}>
       <aside className='dsh-voice-left'>
         <div className='dsh-voice-duration'>{mm}:{ss}</div>
+        <ListenCountdown startAt={phase === 'listening' && !micMuted ? utteranceStartAt : null} visible={phase === 'listening' && !micMuted} />
 
-        <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} />
+        <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} utteranceStartAt={utteranceStartAt} />
 
         <div className='dsh-voice-state-word'>{phase === 'listening' && micMuted ? '已静音' : PHASE_WORD[phase]}</div>
 

@@ -109,7 +109,7 @@ export function apply(ctx: ClientContext): void {
         },
         settings: () => {
           const resolved = controller.effectiveSettings()
-          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle }
+          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle, asrTheme: resolved.asrTheme }
         },
       }),
     }, CallOverlay)
@@ -159,7 +159,7 @@ export function apply(ctx: ClientContext): void {
         },
         settings: () => {
           const resolved = controller.effectiveSettings()
-          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle }
+          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle, asrTheme: resolved.asrTheme }
         },
       }
     },

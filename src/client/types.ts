@@ -20,7 +20,28 @@ export interface VoiceStatus {
   readonly pendingCount: number
   /** Last failure surfaced to the user (sticky until the next phase move). */
   readonly error: string | null
+  /** Mic muted inside the loop: capture off, call stays armed. */
+  readonly micMuted: boolean
+  /** Turn whose readout is playing (karaoke marker target); null when idle. */
+  readonly spokenTurn: number | null
+  /** Cleaned characters of the spoken turn handed to the engine so far. */
+  readonly spokenChars: number
+  /** Speech-start epoch of the current utterance (60s cap UI); null = none. */
+  readonly utteranceStartAt: number | null
 }
+
+/**
+ * One ordered block of an assistant turn's stream. The native page renders
+ * each block with its own affordance; this is the call-overlay's mirror of
+ * that structure (prose bubbles, collapsible reasoning, tool cards). The
+ * readout chain reads ONLY the text blocks — reasoning and tool mechanics
+ * are never spoken, on every engine.
+ */
+export type TranscriptSegment =
+  | { readonly kind: 'reasoning'; readonly text: string }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'tool-call'; readonly name: string; readonly args: string }
+  | { readonly kind: 'tool-result'; readonly name: string; readonly ok: boolean; readonly text: string }
 
 /** One transcript message in the call overlay's right-hand stream. */
 export interface TranscriptMessage {
@@ -29,15 +50,19 @@ export interface TranscriptMessage {
   readonly role: 'user' | 'assistant'
   /** Turn id — consecutive assistant nodes of one turn merge into one bubble. */
   readonly turn: number
-  /** Plain text content (text blocks joined; markdown kept as-is). */
+  /** Joined prose of the turn's text segments (karaoke base; markdown kept). */
   readonly text: string
+  /** Ordered block mirror of the turn (reasoning / prose / tools). */
+  readonly segments: readonly TranscriptSegment[]
 }
 
 /** Published transcript state: the session's message stream for the overlay. */
 export interface TranscriptState {
   readonly messages: readonly TranscriptMessage[]
-  /** Streaming partial's prose (live typing bubble); '' when idle. */
-  readonly streaming: string
+  /** Live partial's blocks as segments (typing bubble); empty when idle. */
+  readonly streaming: readonly TranscriptSegment[]
   /** Pending interaction cards (approvals/questions) on the session. */
   readonly pending: number
+  /** Names of tools currently executing (live indicator while generating). */
+  readonly runningTools: readonly string[]
 }

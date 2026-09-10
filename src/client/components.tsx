@@ -39,7 +39,7 @@ export interface VoiceInjected {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live session-effective settings (speaker/rate read per render). */
-  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
+  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
 }
 
 /** Component props: the injected face with the hooks compartment bound. */
@@ -63,7 +63,7 @@ export interface VoiceSurfaceProps {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live session-effective settings (speaker/rate read per render). */
-  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
+  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
 }
 
 /** Props of the mic button (composer tool-row seat): the injected face only. */

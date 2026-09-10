@@ -14,6 +14,7 @@ import z from 'schemastery'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { makeVoiceTtsRoutes } from './tts-bridge.ts'
 import { registerQwenUpgrade, QWEN_DEFAULT_ENDPOINT, QWEN_DEFAULT_MODEL } from './tts-qwen.ts'
+import { registerQwenAsrUpgrade } from './asr-bridge.ts'
 
 /** Settings namespace both halves read. */
 export const VOICE_SETTINGS_NAMESPACE = settingsNamespace('voice')
@@ -46,6 +47,8 @@ export interface Config {
   xfyunEndpoint?: string
   /** Voice-print preset shown in the call face ('equalizer' | 'wave'). */
   waveStyle?: string
+  /** Which registered ASR engine listens ('qwen' | 'xfyun'). */
+  asrTheme?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -64,6 +67,7 @@ export const Config: z<Config> = z.object({
   qwenEndpoint: z.string().default(QWEN_DEFAULT_ENDPOINT),
   xfyunEndpoint: z.string().default('wss://tts-api.xfyun.cn/v2/tts'),
   waveStyle: z.string().default('wave'),
+  asrTheme: z.string().default('qwen'),
 })
 
 /**
@@ -80,6 +84,7 @@ export function apply(ctx: Context, config?: Config): void {
   // the bridge routes are guaranteed a live registration site.
   for (const route of makeVoiceTtsRoutes(ctx)) ctx.webServer.register(route)
   ctx.webServer.registerUpgrade(registerQwenUpgrade(ctx))
+  ctx.webServer.registerUpgrade(registerQwenAsrUpgrade(ctx))
 }
 
 /** The bridge routes mount with the web server; credentials resolve per request. */

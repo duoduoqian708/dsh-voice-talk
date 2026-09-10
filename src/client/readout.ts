@@ -122,3 +122,36 @@ export function extractReadout(rawText: string, maxChars = 0): string {
   }
   return body
 }
+
+/**
+ * Stream-safe cleaner: like cleanForSpeech, but an UNCLOSED fenced code block
+ * is swallowed whole (its content may still be arriving) instead of leaking
+ * code into speech.
+ */
+export function cleanStreamProse(raw: string): string {
+  const openFence = raw.lastIndexOf('```')
+  const closedFences = (raw.match(/```/g) ?? []).length
+  let safe = raw
+  if (closedFences % 2 === 1 && openFence >= 0) safe = raw.slice(0, openFence)
+  // The newline-collapsed tail often ends in a dangling pause; trim it.
+  return cleanForSpeech(safe).replace(/[，,、]+$/, '')
+}
+
+/**
+ * Raw-prefix length matching a cleaned-char count: the karaoke marker maps
+ * "N cleaned characters have been read" back onto the rendered raw text.
+ * Prefix-cleaned length is not perfectly monotone at fence boundaries, so
+ * this is a visual approximation (sentence-grained, which is how pieces
+ * arrive anyway).
+ */
+export function rawPrefixForCleaned(text: string, chars: number): number {
+  if (chars <= 0) return 0
+  let lo = 0
+  let hi = text.length
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (cleanStreamProse(text.slice(0, mid)).length <= chars) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
