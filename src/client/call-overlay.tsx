@@ -20,6 +20,7 @@ import { CallBreath } from './voice-wave.ts'
 import { WavePrint } from './wave-print.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
 import { nearestRateLabel } from './voice-settings.ts'
+import { RateMagnetSlider } from './rate-magnet.tsx'
 import { rawPrefixForCleaned } from './readout.ts'
 import { Markdown } from './markdown.tsx'
 import avatarUrl from './assets/avatar.png'
@@ -320,36 +321,6 @@ const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }
 })
 
 /**
- * Rate cycler: the five magnet stops. The label echoes locally — the session
- * rate override lives outside the voice snapshot, so without this echo the
- * label would only refresh on the next unrelated re-render (the duration
- * timer backstops it at 500ms). Cycling reads the local echo too, so rapid
- * clicks step 1.0→1.2→1.5 instead of replaying a stale prop.
- */
-function RateButton({ rate, onCycle }: { rate: number; onCycle(next: number): void }): ReactElement {
-  // The prop is only the mount-time seed: the controls remount per call
-  // entry, so a session rate that survived a hang-up re-syncs here.
-  const [shown, setShown] = useState(rate)
-  return (
-    <button
-      type='button'
-      className='dsh-voice-ctl dsh-voice-rate'
-      title={`语速（仅本会话）：${nearestRateLabel(shown)}`}
-      onClick={() => {
-        const stops = [1.0, 1.2, 1.5, 1.8, 2.0]
-        const next = stops[(stops.indexOf(Math.round(shown * 10) / 10) + 1) % stops.length]
-          ?? stops.find(s => s > shown)!
-          ?? stops[0]!
-        onCycle(next)
-        setShown(next)
-      }}
-    >
-      <span className='dsh-voice-ctl-value'>{nearestRateLabel(shown)}</span>
-    </button>
-  )
-}
-
-/**
  * The full-screen call stage, rendered only while the loop is armed.
  */
 export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
@@ -473,10 +444,13 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
 
         <div className='dsh-voice-controls'>
           <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} />
-          <RateButton rate={rate} onCycle={setRateOverride} />
+          <div className='dsh-voice-rate-control' title='语速（仅本会话）'>
+            <span className='dsh-voice-ctl-value'>{nearestRateLabel(rate)}</span>
+            <RateMagnetSlider rate={rate} onChange={setRateOverride} />
+          </div>
           <button
             type='button'
-            className='dsh-voice-ctl dsh-voice-hangup-ctl'
+            className='dsh-voice-hangup-ctl'
             onClick={hangUp}
             title='结束语音对话（Esc）'
             aria-label='结束语音对话'
@@ -575,54 +549,96 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
  * the lock keeps the control honest with that (switchable = takes effect).
  */
 function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase'] }): ReactElement {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const currentRef = useRef<HTMLButtonElement | null>(null)
   const theme = settings().ttsTheme
   // A stored '' (the retired 主题默认 option) reads as the theme default.
   const storedSpeaker = settings().speakerByTheme[theme]
   const current = (storedSpeaker === undefined || storedSpeaker === '')
     ? (voiceThemeOf(theme)?.defaultSpeaker ?? settings().voiceName)
     : storedSpeaker
-  const lang = settings().voiceLang
-  const options = speakersForTheme(theme, lang)
+  const options = speakersForTheme(theme, settings().voiceLang)
   const locked = phase === 'thinking' || phase === 'speaking'
   // （默认）marks the BUILT-IN default — the current selection is already
-  // shown by the select's own checkmark; mixing the two produced two 默认s.
+  // shown by the row's checkmark; mixing the two produced two 默认s.
   const defaultId = voiceThemeOf(theme)?.defaultSpeaker ?? ''
   const labelOf = (id: string): string => {
     const hit = options.find(o => o.id === id)
     return hit !== undefined && !('more' in hit) ? hit.label : (id === '' ? '系统默认' : id)
   }
-  // Grouped roster (qwen): render optgroup headers; flat rosters unchanged.
-  const grouped = options.every(o => 'group' in o || 'more' in o)
-    && options.some(o => 'group' in o)
+  const groups = [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))]
+  // Locked mid-round, or a click outside / Esc: the popup folds away.
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent): void => {
+      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  useEffect(() => {
+    if (locked) setOpen(false)
+  }, [locked])
+  // Open onto the current row, not the top of a 38-voice roster.
+  useEffect(() => {
+    if (open) currentRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [open])
   const pick = (id: string): void => {
     // Session-scope override: the HUD speaker choice holds for this session
     // only (survives hang-ups) and never touches the stored defaults.
     setVoiceOverride(id)
+    setOpen(false)
   }
+  const item = (option: { id: string; label: string }): ReactElement => (
+    <button
+      key={option.id || '__default'}
+      ref={option.id === current ? currentRef : undefined}
+      type='button'
+      role='option'
+      aria-selected={option.id === current}
+      className='dsh-voice-speaker-item'
+      data-current={option.id === current || undefined}
+      onClick={() => pick(option.id)}
+    >
+      <span className='dsh-voice-speaker-check' aria-hidden='true'>{option.id === current ? '✓' : ''}</span>
+      <span className='dsh-voice-speaker-label'>{option.label}{option.id === defaultId ? '（默认）' : ''}</span>
+    </button>
+  )
   return (
-    <label className='dsh-voice-ctl' title={locked ? '本轮回复播完后可切换' : '说话人'}>
-      <select
-        className='dsh-voice-ctl-select'
-        value={current}
-        disabled={locked}
-        onChange={event => { pick(event.target.value) }}
+    <div className='dsh-voice-speaker' ref={rootRef}>
+      <button
+        type='button'
+        className='dsh-voice-speaker-btn'
+        data-locked={locked || undefined}
+        onClick={() => { if (!locked) setOpen(o => !o) }}
+        title={locked ? '本轮回复播完后可切换' : '说话人'}
+        aria-haspopup='listbox'
+        aria-expanded={open}
         aria-label='说话人'
       >
-        {grouped
-          ? [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))].map(group => (
-            <optgroup key={group} label={group}>
-              {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => (
-                <option key={option.id} value={option.id}>{option.label}{option.id === defaultId ? '（默认）' : ''}</option>
-              ))}
-            </optgroup>
-          ))
-          : options.map(option => (
-            <option key={option.id || '__default'} value={option.id}>
-              {option.label}{option.id === defaultId ? '（默认）' : ''}
-            </option>
-          ))}
-      </select>
-      <span className='dsh-voice-ctl-value'>{labelOf(current)}</span>
-    </label>
+        <span className='dsh-voice-ctl-value'>{labelOf(current)}</span>
+        <i className='dsh-voice-speaker-caret' aria-hidden='true' />
+      </button>
+      {open && (
+        <div className='dsh-voice-speaker-pop' role='listbox' aria-label='说话人'>
+          {groups.length === 0
+            ? options.map(option => item(option))
+            : groups.map(group => (
+              <div key={group} role='group' aria-label={group}>
+                <div className='dsh-voice-speaker-group'>{group}</div>
+                {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => item(option))}
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
   )
 }
