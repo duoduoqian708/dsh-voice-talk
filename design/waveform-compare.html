@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+<title>中轴对称波形 · 极简四版</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #141b24;
+    --ink: #e6edf3;
+    --ink-dim: #8b9bab;
+    --line: rgba(140, 200, 210, .1);
+    --accent: #37d3c6;
+    --accent-soft: rgba(55, 211, 198, .32);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6f6;
+      --surface: #ffffff;
+      --ink: #1b2429;
+      --ink-dim: #5c6a74;
+      --line: rgba(15, 60, 60, .12);
+      --accent: #0d9c92;
+      --accent-soft: rgba(13, 156, 146, .28);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 36px 20px 56px; }
+  header { text-align: center; margin-bottom: 34px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: .02em; }
+  .sub { color: var(--ink-dim); font-size: 13.5px; margin: 10px auto 0; max-width: 52ch; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .panel-title { font-size: 13px; font-weight: 500; margin: 0; letter-spacing: .03em; }
+  .panel-note { font-size: 12px; color: var(--ink-dim); }
+  .stage {
+    position: relative; height: 130px; border-radius: 10px; overflow: hidden;
+    background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+  }
+  .base { position: absolute; left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%); background: var(--line); }
+  .bars { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 18px 14px; }
+  .bars i {
+    background: var(--accent);
+    transform-origin: center;
+    transform: scaleY(0.02);
+  }
+
+  /* variant B: glow toward center */
+  .bars.b i { background: var(--accent); }
+  /* variant C: capsule */
+  .bars.c i { border-radius: 999px; }
+  /* variant D: peak wrapper */
+  .dbar { position: relative; flex: 1; min-width: 0; height: 100%; }
+  .dbar i { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 3px; height: 84px; transform-origin: center; }
+  .dbar .peak { background: var(--accent-soft); }
+
+  .note { margin-top: 26px; text-align: center; color: var(--ink-dim); font-size: 12.5px; }
+  .note b { color: var(--ink); font-weight: 500; }
+
+  #veil {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    text-align: center; padding: 20px;
+  }
+  #veil .big { font-size: 15px; font-weight: 500; }
+  #veil .hint { font-size: 12.5px; color: var(--ink-dim); }
+  #veil button {
+    font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--accent); color: var(--bg);
+    padding: 10px 26px;
+  }
+  #veil.hidden { display: none; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+</style>
+
+<main class="wrap">
+  <header>
+    <h1>中轴对称波形 · 极简四版</h1>
+    <p class="sub">同一份声音数据、同一种颜色，四种安静的做法——静音时收成一条线，有声时每条从中心线上下对称波动。</p>
+  </header>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">细线等距</h2><span class="panel-note">60 条 · 3px</span></div>
+      <div class="stage"><div class="base"></div><div class="bars a" id="b-a"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">中心辉光</h2><span class="panel-note">中间亮 · 两端淡</span></div>
+      <div class="stage"><div class="base"></div><div class="bars b" id="b-b"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">圆角胶囊</h2><span class="panel-note">40 条 · 7px 圆角</span></div>
+      <div class="stage"><div class="base"></div><div class="bars c" id="b-c"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">峰值留痕</h2><span class="panel-note">56 条 · 淡影停留</span></div>
+      <div class="stage"><div class="base"></div><div class="bars d" id="b-d"></div></div>
+    </section>
+  </div>
+
+  <p class="note"><b>形态一致：</b>全部中轴对称细条，静音=一条直线。差别只在条宽、条数、圆角、辉光与峰值留痕——都不跳很快。</p>
+</main>
+
+<div id="veil">
+  <div class="big">▶ 点击开始</div>
+  <div class="hint">浏览器要求先点击一次才能出声。</div>
+  <button id="go">开始</button>
+</div>
+
+<script>
+  (function () {
+    var $ = function (id) { return document.getElementById(id) }
+    var veil = $('veil'), go = $('go')
+
+    function bars(container, n) {
+      for (var i = 0; i < n; i++) container.appendChild(document.createElement('i'))
+      return Array.prototype.slice.call(container.children)
+    }
+    var A = bars($('b-a'), 60)
+    var B = bars($('b-b'), 80)
+    var C = bars($('b-c'), 40)
+    var D = $('b-d')
+    var Dm = [], Dp = []
+    for (var i = 0; i < 56; i++) {
+      var wrap = document.createElement('div'); wrap.className = 'dbar'
+      var main = document.createElement('i')
+      var peak = document.createElement('i'); peak.className = 'peak'
+      wrap.appendChild(main); wrap.appendChild(peak)
+      D.appendChild(wrap); Dm.push(main); Dp.push(peak)
+    }
+
+    // per-bar smoothed levels (slow, calm motion)
+    function mkLevel(n) { var a = new Array(n); for (var i = 0; i < n; i++) a[i] = 0.02; return a }
+    var lvA = mkLevel(60), lvB = mkLevel(80), lvC = mkLevel(40), lvD = mkLevel(56)
+    var pkD = mkLevel(56)
+
+    var ctx = null, analyser = null, master = null, running = false, raf = 0
+
+    function initAudio() {
+      var AC = window.AudioContext || window.webkitAudioContext
+      if (!AC) return
+      ctx = new AC()
+      analyser = ctx.createAnalyser()
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.9   // heavy smoothing = calm motion
+      master = ctx.createGain()
+      master.gain.value = 0.0001
+      master.connect(analyser)
+
+      var osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.value = 260
+      var lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.55
+      var lfoGain = ctx.createGain(); lfoGain.gain.value = 95
+      lfo.connect(lfoGain).connect(osc.frequency)
+
+      var osc2 = ctx.createOscillator(); osc2.type = 'triangle'; osc2.frequency.value = 523
+      var lfo2 = ctx.createOscillator(); lfo2.type = 'sine'; lfo2.frequency.value = 0.8
+      var lfo2Gain = ctx.createGain(); lfo2Gain.gain.value = 120
+      lfo2.connect(lfo2Gain).connect(osc2.frequency)
+
+      var bed = ctx.createOscillator(); bed.type = 'sawtooth'; bed.frequency.value = 88
+      var g = ctx.createGain(); g.gain.value = 0.22
+      osc.connect(g); osc2.connect(g); bed.connect(g)
+      g.connect(master)
+      osc.start(); lfo.start(); osc2.start(); lfo2.start(); bed.start()
+    }
+
+    // variant B: bars are brightest at center, fading toward the edges
+    var bOpacity = []
+    for (var i = 0; i < B.length; i++) {
+      bOpacity.push(1 - Math.pow(Math.abs(i - (B.length - 1) / 2) / (B.length / 2), 2) * 0.75)
+    }
+
+    function tick() {
+      if (!running) return
+      var tdata = new Uint8Array(analyser.fftSize)
+      analyser.getByteTimeDomainData(tdata)
+      var gain = 5.5  // gentle amplitude — not jumpy
+
+      // A: fine equal-width lines
+      var step = Math.max(1, Math.floor(tdata.length / A.length))
+      for (var i = 0; i < A.length; i++) {
+        var amp = Math.min(1, Math.abs((tdata[i * step] - 128) / 128) * gain)
+        lvA[i] += (amp - lvA[i]) * 0.07
+        A[i].style.width = '3px'
+        A[i].style.height = '90px'
+        A[i].style.borderRadius = '0'
+        A[i].style.transform = 'scaleY(' + lvA[i].toFixed(3) + ')'
+      }
+      // B: glow toward center (same hue, opacity fading to edges)
+      step = Math.max(1, Math.floor(tdata.length / B.length))
+      for (var j = 0; j < B.length; j++) {
+        var ampB = Math.min(1, Math.abs((tdata[j * step] - 128) / 128) * gain)
+        lvB[j] += (ampB - lvB[j]) * 0.07
+        B[j].style.width = '2px'
+        B[j].style.height = '96px'
+        B[j].style.borderRadius = '0'
+        B[j].style.opacity = bOpacity[j]
+        B[j].style.transform = 'scaleY(' + lvB[j].toFixed(3) + ')'
+      }
+      // C: thick capsules, wide spacing
+      step = Math.max(1, Math.floor(tdata.length / C.length))
+      for (var k = 0; k < C.length; k++) {
+        var ampC = Math.min(1, Math.abs((tdata[k * step] - 128) / 128) * gain)
+        lvC[k] += (ampC - lvC[k]) * 0.07
+        C[k].style.width = '7px'
+        C[k].style.height = '64px'
+        C[k].style.borderRadius = '999px'
+        C[k].style.transform = 'scaleY(' + lvC[k].toFixed(3) + ')'
+      }
+      // D: peak-hold ghost behind a fine main line
+      step = Math.max(1, Math.floor(tdata.length / Dm.length))
+      for (var m = 0; m < Dm.length; m++) {
+        var ampD = Math.min(1, Math.abs((tdata[m * step] - 128) / 128) * gain)
+        lvD[m] += (ampD - lvD[m]) * 0.07
+        pkD[m] = Math.max(pkD[m] * 0.99, lvD[m])
+        Dm[m].style.transform = 'translate(-50%,-50%) scaleY(' + lvD[m].toFixed(3) + ')'
+        Dp[m].style.transform = 'translate(-50%,-50%) scaleY(' + (pkD[m] * 0.9).toFixed(3) + ')'
+      }
+      raf = requestAnimationFrame(tick)
+    }
+
+    go.addEventListener('click', function () {
+      veil.classList.add('hidden')
+      if (!ctx) initAudio()
+      if (!ctx) return
+      if (ctx.state === 'suspended') ctx.resume()
+      running = true
+      master.gain.cancelScheduledValues(ctx.currentTime)
+      master.gain.setTargetAtTime(0.5, ctx.currentTime, 0.05)
+      tick()
+    })
+  })()
+</script>
+</html>
