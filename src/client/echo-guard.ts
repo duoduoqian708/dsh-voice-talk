@@ -15,6 +15,20 @@ export function normalizeForEcho(text: string): string {
     .toLowerCase()
 }
 
+/**
+ * Explicit "silence the readout" commands. They bypass the echo guard and
+ * the arm delay entirely: short commands like 打住 are unconditionally
+ * echo-classified by the length gate below and could never interrupt, and
+ * on speaker playback they mean "stop", not "answer this". Exact match
+ * after normalization — no fuzzy matching, zero false-positive surface.
+ */
+const STOP_COMMANDS = ['打住', '停', '停下', '停止', '停一下', '停一停', '别念了', '别读了', '别说了', '闭嘴', 'stop']
+
+/** Whether the utterance is an explicit stop-readout command. */
+export function isStopCommand(utterance: string): boolean {
+  return STOP_COMMANDS.includes(normalizeForEcho(utterance))
+}
+
 /** Minimum normalized length of an utterance before echo judgment applies. */
 const MIN_UTTERANCE_LENGTH = 4
 /** Minimum shared character run that counts as suffix/containment overlap. */

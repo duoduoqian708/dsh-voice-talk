@@ -19,7 +19,7 @@ import { sessionFromSpeak } from './speech.ts'
 import { CloudRecognizer } from './asr.ts'
 import { cleanForSpeech, cleanStreamProse } from './readout.ts'
 export { cleanStreamProse } from './readout.ts'
-import { looksLikeEcho } from './echo-guard.ts'
+import { isStopCommand, looksLikeEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
@@ -504,6 +504,15 @@ export class VoiceController {
     if (this.status.getSnapshot().mode !== 'loop') return
     if (this.status.getSnapshot().micMuted) return
     if (this.#speaking) {
+      // Stop commands first: they bypass the echo guard and the arm delay
+      // (the guard unconditionally eats short commands), and they only
+      // silence the readout — cancelling the session lets #settleTurn's
+      // await resolve and the round close back into listening, without
+      // submitting the command as a prompt.
+      if (isStopCommand(text)) {
+        this.#speaker().cancel()
+        return
+      }
       const settings = resolveSettings(this.#deps.settings())
       const armed = settings.allowInterrupt
         && Date.now() - this.#speakingSince >= BARGE_IN_ARM_MS
