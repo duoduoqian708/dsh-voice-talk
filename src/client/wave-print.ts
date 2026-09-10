@@ -22,6 +22,8 @@ export class WavePrint {
   readonly #phaseOf: () => VoicePhase
   #anim: AnimationItem | null = null
   #flipped = false
+  /** Smoothed display amplitude 0..1 — 0 renders the flat idle line. */
+  #level = 0
 
   constructor(host: HTMLElement, style: string, phaseOf: () => VoicePhase) {
     this.#host = host
@@ -44,7 +46,7 @@ export class WavePrint {
       rendererSettings: { preserveAspectRatio: 'xMidYMid slice' },
     })
     this.#flipped = this.#style === 'wave' && this.#phaseOf() === 'listening'
-    this.#applyFlip()
+    this.#applyTransform()
   }
 
   /** Direction flip for the flowing wave: listening (user speaks) mirrors it. */
@@ -53,12 +55,26 @@ export class WavePrint {
     const flipped = phase === 'listening'
     if (flipped !== this.#flipped) {
       this.#flipped = flipped
-      this.#applyFlip()
+      this.#applyTransform()
     }
   }
 
-  #applyFlip(): void {
-    this.#host.style.transform = this.#flipped ? 'scaleX(-1)' : ''
+  /**
+   * Per-frame mic level from the shared capture: 0 renders the flat idle
+   * line, speech expands the wave (scaleY) with fast attack / slow release.
+   * Fed every frame by the breath's rAF — no own clock, driven passively.
+   */
+  setLevel(level: number): void {
+    const target = level <= 0.05 ? 0 : Math.min(1, level)
+    this.#level += (target - this.#level) * (target > this.#level ? 0.4 : 0.18)
+    this.#applyTransform()
+  }
+
+  /** Flip + amplitude on one transform: scaleY compresses toward the comp's
+   *  vertical center, which both presets share — 0.04 reads as a plain line. */
+  #applyTransform(): void {
+    const s = 0.04 + this.#level * 1.2
+    this.#host.style.transform = `${this.#flipped ? 'scaleX(-1) ' : ''}scaleY(${s.toFixed(3)})`
   }
 
   dispose(): void {

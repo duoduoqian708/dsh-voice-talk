@@ -174,6 +174,9 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt 
     breath.start()
     const print = withBars ? null : new WavePrint(waveEl, waveStyle, () => phaseRef.current)
     printRef.current = print
+    // The breath's per-frame mic level drives the print's amplitude: silent
+    // or muted capture collapses the wave into its flat idle line.
+    breath.setLevelSink(print === null ? null : level => print.setLevel(level))
     return () => {
       print?.dispose()
       printRef.current = null

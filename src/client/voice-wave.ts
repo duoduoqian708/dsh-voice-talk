@@ -40,6 +40,12 @@ export class CallBreath {
   #analyser: AnalyserNode | null = null
   #stream: MediaStream | null = null
   #micTriedAt = 0
+  #levelSink: ((level: number) => void) | null = null
+
+  /** Receive the per-frame live mic level (0 unless listening with capture). */
+  setLevelSink(sink: ((level: number) => void) | null): void {
+    this.#levelSink = sink
+  }
   #micFailed = false
   #data: Uint8Array | null = null
 
@@ -153,6 +159,7 @@ export class CallBreath {
     // Muted reads as idle: near-still bars, no breath, no live analyser.
     const phase: VoicePhase = this.#muted ? 'idle' : this.#phase
     const live = phase === 'listening' ? this.#liveAmp() : null
+    this.#levelSink?.(live ?? 0)
     const target = live ?? this.#proceduralAmp(phase)
     this.#amp += (target - this.#amp) * (live !== null ? 0.35 : 0.12)
     this.#ampSlow += (this.#amp - this.#ampSlow) * AMP_SMOOTH
