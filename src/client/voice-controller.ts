@@ -719,15 +719,17 @@ export class VoiceController {
     if (this.#disposed) return
     const token = this.#roundToken
     const settings = resolveSettings(this.#deps.settings())
-    const session = this.#session
     // The fold of the last in-flight step may land after `running` fell; the
-    // partial still holds its text, so flush that remainder before closing.
+    // partial still holds its text, so flush that remainder before closing —
+    // the flush is also where a lazily-opened session may first start, so it
+    // must run before the session-null gate below.
     const partial = this.#deps.readSnapshot().partial
-    if (partial !== null && session !== null) {
+    if (partial !== null) {
       const prose = partialTextOf(partial)
       if (prose.length > this.#streamRaw.length) this.#streamRaw = prose
       this.#flushStreamSentences(true)
     }
+    const session = this.#session
     if (session === null) {
       this.#finishRound()
       return
