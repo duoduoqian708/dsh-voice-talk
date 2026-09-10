@@ -56,10 +56,13 @@ export interface TtsProvider {
    * - resolves after `done()` + the last queued piece finishes playing, and
    *   also when `cancel()` stops a session (skip = deliberate stop);
    * - rejects with a surfaced message on synthesis failure.
+   * `onProgress` receives the CUMULATIVE character count of pieces that have
+   * started playing (the karaoke marker; engines without piece boundaries
+   * report at push time — a close-enough lead).
    * Themes without a native streaming engine inherit the buffered default
    * ({@link sessionFromSpeak}), which is exactly the old speak-on-done path.
    */
-  startSession?(opts: SpeakOptions, onInterrupted: () => void): TtsSession
+  startSession?(opts: SpeakOptions, onInterrupted: () => void, onProgress?: (playedChars: number) => void): TtsSession
 }
 
 /** One streaming synthesis feed (see {@link TtsProvider.startSession}). */
@@ -79,7 +82,7 @@ export interface TtsSession {
  * play in order once `done()` arrives — the pre-streaming behavior, used by
  * themes without a native `startSession`.
  */
-export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onInterrupted: () => void): TtsSession {
+export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onInterrupted: () => void, onProgress?: (playedChars: number) => void): TtsSession {
   let buffer = ''
   let ended = false
   let settled = false
@@ -90,6 +93,7 @@ export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onIn
     failDone = reject
   })
   let chain: Promise<void> | null = null
+  let played = 0
   const pump = (): void => {
     if (settled || chain !== null) return
     if (buffer === '') {
@@ -101,6 +105,8 @@ export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onIn
     }
     const text = buffer
     buffer = ''
+    played += text.length
+    onProgress?.(played)
     chain = provider.speak(text, opts, onInterrupted).then(() => {
       chain = null
       pump()
@@ -178,6 +184,10 @@ export class ChromeRecognizer implements Recognizer {
   #restartAttempt = 0
   #disposed = false
   #restartTimer: ReturnType<typeof setTimeout> | null = null
+  /** The recognition instance currently alive. The onend auto-restart builds
+   *  a NEW one that the controller's handle can never know about, so stop()
+   *  must abort this "current" reference, not the handle's own closure. */
+  #recognition: SpeechRecognitionLike | null = null
 
   supported(): boolean {
     return typeof window !== 'undefined'
@@ -195,6 +205,7 @@ export class ChromeRecognizer implements Recognizer {
       return null
     }
     const recognition = new Ctor()
+    this.#recognition = recognition
     recognition.lang = navigator.language?.startsWith('zh') ? 'zh-CN' : (navigator.language || 'zh-CN')
     recognition.continuous = true
     recognition.interimResults = true
@@ -256,7 +267,12 @@ export class ChromeRecognizer implements Recognizer {
           // abort(), not stop(): stop() flushes Chrome's recognition buffer as
           // a final result — after a hang-up that tail would land in the
           // composer and send. abort() discards the buffer silently.
-          recognition.abort()
+          // Abort the CURRENT instance: the onend auto-restart replaces the
+          // closed-over recognition with a newer one, and aborting the stale
+          // closure left the live mic capturing after a hang-up.
+          const live = this.#recognition
+          this.#recognition = null
+          live?.abort()
         } catch {
           // already stopped
         }
@@ -310,14 +326,16 @@ export class SystemTtsProvider implements TtsProvider {
   /**
    * Native streaming session: pushed pieces become utterances immediately
    * (in queue order), so the first sentence speaks while later text is still
-   * generating. `done()` marks the end of the feed.
+   * generating. `done()` marks the end of the feed; each piece reports the
+   * cumulative played count as it starts (the karaoke marker).
    */
-  startSession(opts: SpeakOptions, onInterrupted: () => void): TtsSession {
+  startSession(opts: SpeakOptions, onInterrupted: () => void, onProgress?: (playedChars: number) => void): TtsSession {
     const synth = window.speechSynthesis
     const queue: string[] = []
     let ended = false
     let settled = false
     let speaking = false
+    let played = 0
     let resolveDone: (() => void) | null = null
     let failDone: ((error: Error) => void) | null = null
     const finished = new Promise<void>((resolve, reject) => {
@@ -340,6 +358,8 @@ export class SystemTtsProvider implements TtsProvider {
         }
         return
       }
+      played += text.length
+      onProgress?.(played)
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.rate = opts.rate
       utterance.lang = opts.lang
