@@ -108,9 +108,9 @@ function pendingCountOf(snapshot: ConversationSnapshot): number {
 }
 
 /** Plain text of one finalized node's blocks (text blocks joined). */
-function nodeText(blocks: readonly { kind: string; text?: string }[]): string {
+function nodeText(blocks: readonly { kind?: string; type?: string; text?: string }[]): string {
   return blocks
-    .filter(block => block.kind === 'text')
+    .filter(block => block.kind === 'text' || block.type === 'text')
     .map(block => block.text ?? '')
     .join('')
 }
@@ -136,7 +136,7 @@ function segmentsOfBlocks(blocks: readonly unknown[]): TranscriptSegment[] {
 
 /** Text blocks of a tool result, capped to a preview. */
 function resultText(content: readonly unknown[]): string {
-  const text = nodeText(content as readonly { kind: string; text?: string }[])
+  const text = nodeText(content as readonly { kind?: string; type?: string; text?: string }[])
   return text.length > RESULT_PREVIEW_CHARS ? `${text.slice(0, RESULT_PREVIEW_CHARS)}…` : text
 }
 
@@ -179,7 +179,7 @@ export function transcriptOf(snapshot: ConversationSnapshot, prev?: TranscriptSt
   const candidate: TranscriptMessage[] = []
   for (const node of snapshot.nodes) {
     if (node.kind === 'user') {
-      const text = nodeText(node.content as unknown as readonly { kind: string; text?: string }[])
+      const text = nodeText(node.content)
       candidate.push({ seq: node.seq, turn: -1, role: 'user', text, segments: [{ kind: 'text', text }] })
     } else if (node.kind === 'assistant') {
       // One turn often emits several assistant nodes (prose, tool-call
@@ -746,11 +746,16 @@ export class VoiceController {
     if (!provider.supported()) return
     const speaker = settings.speakerByTheme[settings.ttsTheme] ?? settings.voiceName
     try {
-      this.#session = (provider.startSession ?? ((o, i, p) => sessionFromSpeak(provider, o, i, p)))(
-        { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) },
-        () => { /* interrupted: the recognizer's next final drives the loop */ },
-        chars => this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: chars }),
-      )
+      const opts = { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) }
+      const interrupted = (): void => { /* interrupted: the recognizer's next final drives the loop */ }
+      const progress = (chars: number): void => this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: chars })
+      // Extracting the method into the old `?? fallback` one-liner dropped
+      // `this` (strict-mode detached call): both providers register the
+      // session on the instance there (#activeSession), so it threw.
+      const startSession = provider.startSession
+      this.#session = startSession !== undefined
+        ? startSession.call(provider, opts, interrupted, progress)
+        : sessionFromSpeak(provider, opts, interrupted, progress)
     } catch (error) {
       this.#notifyError(error instanceof Error ? error.message : String(error))
     }
