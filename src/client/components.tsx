@@ -28,6 +28,8 @@ export interface VoiceInjected {
   toggleVoice(): void
   /** Leave the voice loop (explicit off; the overlay hang-up uses it). */
   hangUp(): void
+  /** Toggle in-call mic mute (capture off, the loop stays armed). */
+  toggleMute(): void
   /** Skip the current readout. */
   stopSpeaking(): void
   /** Session-scope rate override (HUD writes; dies with the session). */
@@ -37,7 +39,7 @@ export interface VoiceInjected {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live session-effective settings (speaker/rate read per render). */
-  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }
+  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
 }
 
 /** Component props: the injected face with the hooks compartment bound. */
@@ -50,6 +52,8 @@ export interface VoiceSurfaceProps {
   toggleVoice(): void
   /** Leave the voice loop (explicit off). */
   hangUp(): void
+  /** Toggle in-call mic mute (capture off, the loop stays armed). */
+  toggleMute(): void
   /** Skip the current readout. */
   stopSpeaking(): void
   /** Session-scope rate override (HUD writes; dies with the session). */
@@ -59,7 +63,7 @@ export interface VoiceSurfaceProps {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live session-effective settings (speaker/rate read per render). */
-  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }
+  settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
 }
 
 /** Props of the mic button (composer tool-row seat): the injected face only. */

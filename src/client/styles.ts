@@ -285,6 +285,8 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   display: flex; align-items: center; justify-content: space-between;
   gap: 4px; height: 56px; margin: 0;
 }
+/* voice-print lottie fills the slot (slice crops the comp's empty bands) */
+.dsh-voice-wave > svg { width: 100%; height: 100%; }
 .dsh-voice-wave-bar {
   width: 4px; height: 6px; border-radius: 2px;
   background: #1D1D1F; opacity: .85;

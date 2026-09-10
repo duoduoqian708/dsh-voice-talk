@@ -31,9 +31,11 @@ export interface BreathTargets {
 export class CallBreath {
   readonly #targets: BreathTargets
   readonly #wave: HTMLElement
+  readonly #withBars: boolean
   readonly #bars: HTMLDivElement[] = []
   readonly #phaseOf: () => VoicePhase
   #phase: VoicePhase = 'idle'
+  #muted = false
   #raf: number | null = null
   #t = 0
   #amp = 0.3
@@ -45,12 +47,15 @@ export class CallBreath {
   #micFailed = false
   #data: Uint8Array | null = null
 
-  constructor(targets: BreathTargets, waveContainer: HTMLElement, phaseOf: () => VoicePhase) {
+  /** withBars=false hands the wave slot to the lottie voice-print; the
+   *  engine then only drives the breath targets and their halos. */
+  constructor(targets: BreathTargets, waveContainer: HTMLElement, phaseOf: () => VoicePhase, withBars = true) {
     this.#targets = targets
     this.#wave = waveContainer
+    this.#withBars = withBars
     this.#phaseOf = phaseOf
     this.#phase = phaseOf()
-    for (let i = 0; i < BARS; i++) {
+    for (let i = 0; withBars && i < BARS; i++) {
       const bar = document.createElement('div')
       bar.className = 'dsh-voice-wave-bar'
       waveContainer.appendChild(bar)
@@ -104,6 +109,17 @@ export class CallBreath {
     this.#phase = phase
   }
 
+  /**
+   * Mic muted: the analyser capture is released (the tab's recording
+   * indicator goes dark) and the motion engine runs at its idle register.
+   */
+  setMuted(muted: boolean): void {
+    if (this.#muted === muted) return
+    this.#muted = muted
+    if (muted) this.releaseMic()
+    else void this.attachMic()
+  }
+
   start(): void {
     if (this.#raf !== null) return
     const frame = (): void => {
@@ -136,35 +152,52 @@ export class CallBreath {
 
   #tick(): void {
     this.#t += 1 / 60
-    const phase = this.#phaseOf()
-    if (phase !== this.#phase) this.#phase = phase
-    const live = this.#phase === 'listening' ? this.#liveAmp() : null
-    const target = live ?? this.#proceduralAmp()
+    const reported = this.#phaseOf()
+    if (reported !== this.#phase) this.#phase = reported
+    // Muted reads as idle: near-still bars, no breath, no live analyser.
+    const phase: VoicePhase = this.#muted ? 'idle' : this.#phase
+    const live = phase === 'listening' ? this.#liveAmp() : null
+    const target = live ?? this.#proceduralAmp(phase)
     this.#amp += (target - this.#amp) * (live !== null ? 0.35 : 0.12)
     this.#ampSlow += (this.#amp - this.#ampSlow) * AMP_SMOOTH
 
-    this.#tickWave()
-    this.#tickBreath()
+    this.#tickWave(phase)
+    this.#tickBreath(phase)
   }
 
   // ---- waveform row ---------------------------------------------------------
 
-  #tickWave(): void {
-    const center = (BARS - 1) / 2
+  /** Per-bar random-walk level (each bar dances on its own target). */
+  readonly #barLevel = new Array<number>(BARS).fill(0.35)
+  readonly #barTarget = new Array<number>(BARS).fill(0.5)
+
+  /**
+   * Equalizer-style bars: every bar chases its own wandering target, so the
+   * row rises and falls per-bar instead of holding a fixed middle-high
+   * envelope. The overall volume still gates the row (mic while listening,
+   * synth pulse while speaking); per-bar motion is what makes it alive.
+   */
+  #tickWave(phase: VoicePhase): void {
+    if (!this.#withBars) return
     for (let i = 0; i < BARS; i++) {
-      const spread = Math.abs(i - center) / center
-      const jitter = 0.5 + 0.5 * Math.abs(Math.sin(this.#t * 9 + i * 1.7))
-      const shape = 1.18 - spread * 0.85
+      // Random walk: occasionally pick a fresh target, otherwise nudge it.
+      // Every bar moves independently (no shared frequency or envelope).
+      const t = this.#barTarget[i]!
+      this.#barTarget[i] = Math.random() < 0.05
+        ? Math.random()
+        : Math.max(0.08, Math.min(1, t + (Math.random() - 0.5) * 0.22))
+      this.#barLevel[i]! += (this.#barTarget[i]! - this.#barLevel[i]!) * 0.3
+      const level = this.#barLevel[i]!
       let heightPx: number
-      switch (this.#phase) {
+      switch (phase) {
         case 'listening':
-          heightPx = 6 + this.#amp * 40 * shape * (0.55 + 0.45 * jitter)
+          heightPx = 6 + this.#amp * 46 * level
           break
         case 'speaking':
-          heightPx = 8 + this.#amp * 44 * shape * (0.45 + 0.55 * jitter)
+          heightPx = 8 + this.#amp * 48 * level
           break
         case 'thinking':
-          heightPx = 6 + this.#amp * 10 * shape
+          heightPx = 5 + this.#amp * 12 * level
           break
         default:
           heightPx = 5
@@ -174,8 +207,8 @@ export class CallBreath {
     }
   }
 
-  #proceduralAmp(): number {
-    switch (this.#phase) {
+  #proceduralAmp(phase: VoicePhase): number {
+    switch (phase) {
       case 'listening': {
         // Speech-like clusters: word bursts separated by short gaps.
         const cluster = Math.pow(Math.abs(Math.sin(this.#t * 1.9 + 1)), 2.2)
@@ -200,9 +233,9 @@ export class CallBreath {
     return breath * 0.035 + this.#ampSlow * 0.075
   }
 
-  #tickBreath(): void {
+  #tickBreath(phase: VoicePhase): void {
     const { whale, key, haloWhale, haloKey } = this.#targets
-    if (this.#phase === 'speaking') {
+    if (phase === 'speaking') {
       const drive = this.#breathDrive()
       whale.style.transform = `scale(${(1 + drive).toFixed(4)})`
       haloWhale.style.opacity = (0.2 + drive * 4.6).toFixed(3)
@@ -211,7 +244,7 @@ export class CallBreath {
       whale.style.transform = ''
       haloWhale.style.opacity = '0'
     }
-    if (this.#phase === 'listening') {
+    if (phase === 'listening') {
       const drive = this.#breathDrive()
       key.style.transform = `scale(${(1 + drive * 1.1).toFixed(4)})`
       haloKey.style.opacity = (0.2 + drive * 4.8).toFixed(3)

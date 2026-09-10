@@ -1,22 +1,27 @@
 // The call overlay: the whole voice interaction lives here. An opaque light
 // canvas split in two glass tiles: the LEFT panel is the call face (hero row:
-// DeepSeek whale | live waveform | hang-up key, centered; duration above;
-// controls below); the RIGHT column is the session's message stream,
-// collapsible for a focused call.
+// DeepSeek whale | live waveform | mute key, centered; duration above;
+// controls — speaker / rate / hang-up — below); the RIGHT column is the
+// session's message stream, a structural mirror of the native stream (prose,
+// collapsible reasoning, tool cards) with a karaoke marker over the parts
+// the readout has actually played, collapsible for a focused call.
 //
 // Signature motion (v2 "Apple" direction): WHO speaks breathes — the whale
-// swells during speaking, the hang-up key during listening; both driven by a
+// swells during speaking, the mute key during listening; both driven by a
 // two-layer signal (3.6s rest rhythm + heavily smoothed mic/synth amplitude)
 // with a halo that opens up the edges. All motion is transform/opacity.
 
 import { createPortal } from 'react-dom'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import type { TranscriptState, VoiceStatus } from './types.ts'
+import type { TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
 import { CallBreath } from './voice-wave.ts'
+import { WavePrint } from './wave-print.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
 import { nearestRateLabel } from './voice-settings.ts'
+import { rawPrefixForCleaned } from './readout.ts'
+import { Markdown } from './markdown.tsx'
 import avatarUrl from './assets/avatar.png'
 
 /** Selector-hook shape over the shared voice status. */
@@ -29,6 +34,8 @@ export interface CallOverlayProps {
   transcript?: ObservableSource<TranscriptState>
   /** Hang up = leave the voice loop (same as Esc). */
   hangUp(): void
+  /** Toggle in-call mic mute (capture off, the loop stays armed). */
+  toggleMute(): void
   /** Skip the current readout. */
   stopSpeaking(): void
   /** Session-scope rate override (HUD writes; dies with the session). */
@@ -38,7 +45,7 @@ export interface CallOverlayProps {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live resolved settings (rate/voiceName read here per render). */
-  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }
+  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string }
 }
 
 const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
@@ -50,38 +57,49 @@ const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
 
 /** No-op store fallbacks for overlays mounted without a transcript source. */
 const subscribeNoop = (): (() => void) => () => { }
-const snapshotNoop = (): TranscriptState => ({ messages: [], streaming: '', pending: 0 })
-
-/** Extract the fenced-code parts of a message for the stream's code styling. */
-function splitCode(text: string): { kind: 'text' | 'code'; body: string }[] {
-  const parts: { kind: 'text' | 'code'; body: string }[] = []
-  const re = /```(\w*)\n?([\s\S]*?)(?:```|$)/g
-  let last = 0
-  for (const m of text.matchAll(re)) {
-    if (m.index! > last) parts.push({ kind: 'text', body: text.slice(last, m.index) })
-    parts.push({ kind: 'code', body: m[2] ?? '' })
-    last = m.index! + m[0].length
-  }
-  if (last < text.length) parts.push({ kind: 'text', body: text.slice(last) })
-  return parts.filter(p => p.body !== '')
-}
+const snapshotNoop = (): TranscriptState => ({ messages: [], streaming: [], pending: 0, runningTools: [] })
 
 /** The DeepSeek whale, inline (vector; fill follows currentColor). */
 function WhaleMark({ className }: { className?: string }): ReactElement {
   return (
     <svg className={className} viewBox='0 0 23.16 17.04' fill='none' aria-hidden='true'>
-      <path d='M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z' fill='currentColor' />
+      <path d='M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.2775 7.89187 13.0545 7.70787C12.8735 7.55786 12.6435 7.51636 12.39 7.51636C12.2955 7.51636 12.2095 7.47486 12.1445 7.44136C12.0395 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.2925 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.2775 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z' fill='currentColor' />
+    </svg>
+  )
+}
+
+/** Mic shape (on). */
+function MicGlyph({ off }: { off?: boolean }): ReactElement {
+  return (
+    <svg width='30' height='30' viewBox='0 0 24 24' fill='none' stroke='currentColor'
+      strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
+      <path d='M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z' />
+      <path d='M19 10v2a7 7 0 0 1-14 0v-2' />
+      <line x1='12' y1='19' x2='12' y2='22' />
+      {off === true && <line x1='4' y1='3' x2='21' y2='21' />}
+    </svg>
+  )
+}
+
+/** Phone shape for the hang-up cell. */
+function PhoneGlyph(): ReactElement {
+  return (
+    <svg width='18' height='18' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+      <path d='M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z' />
     </svg>
   )
 }
 
 /**
- * The call face's hero row: whale | waveform | hang-up. One CallBreath engine
- * drives both breath targets (whale while speaking, key while listening) and
- * their halos; the live mic analyser feeds it while listening.
+ * The call face's hero row: whale | waveform | mute key. One CallBreath
+ * engine drives both breath targets (whale while speaking, key while
+ * listening) and their halos; the live mic analyser feeds it while listening.
+ * The wave slot itself is owned by the settings' voice-print: a lottie
+ * preset ('equalizer' | 'wave') or the legacy mic-reactive bars fallback.
  */
-function Hero({ useVoice, hangUp, phase }: { useVoice: VoiceSelectorHook; hangUp(): void; phase: VoiceStatus['phase'] }): ReactElement {
+function Hero({ useVoice, toggleMute, phase, muted, waveStyle }: { useVoice: VoiceSelectorHook; toggleMute(): void; phase: VoiceStatus['phase']; muted: boolean; waveStyle: string }): ReactElement {
   const breathRef = useRef<CallBreath | null>(null)
+  const printRef = useRef<WavePrint | null>(null)
   const whaleRef = useRef<HTMLDivElement | null>(null)
   const keyRef = useRef<HTMLButtonElement | null>(null)
   const haloWhaleRef = useRef<HTMLSpanElement | null>(null)
@@ -97,22 +115,32 @@ function Hero({ useVoice, hangUp, phase }: { useVoice: VoiceSelectorHook; hangUp
     const haloWhaleEl = haloWhaleRef.current
     const haloKeyEl = haloKeyRef.current
     if (waveEl === null || whaleEl === null || keyEl === null || haloWhaleEl === null || haloKeyEl === null) return
+    // Known presets hand the slot to lottie; anything else keeps the legacy
+    // mic-reactive bars (defensive fallback for a hand-edited config).
+    const withBars = waveStyle !== 'equalizer' && waveStyle !== 'wave'
     const breath = new CallBreath({
       whale: whaleEl, key: keyEl, haloWhale: haloWhaleEl, haloKey: haloKeyEl,
-    }, waveEl, () => phaseRef.current)
+    }, waveEl, () => phaseRef.current, withBars)
     breathRef.current = breath
     breath.start()
+    const print = withBars ? null : new WavePrint(waveEl, waveStyle, () => phaseRef.current)
+    printRef.current = print
     return () => {
+      print?.dispose()
+      printRef.current = null
       breath.dispose()
       breathRef.current = null
     }
+    // Re-run on waveStyle so a settings change swaps the print live mid-call.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [waveStyle])
   useEffect(() => {
-    const breath = breathRef.current
-    if (breath == null) return
-    breath.setPhase(phase)
+    breathRef.current?.setPhase(phase)
+    printRef.current?.setPhase(phase)
   }, [phase])
+  useEffect(() => {
+    breathRef.current?.setMuted(muted)
+  }, [muted])
 
   return (
     <div className='dsh-voice-hero'>
@@ -125,27 +153,100 @@ function Hero({ useVoice, hangUp, phase }: { useVoice: VoiceSelectorHook; hangUp
 
       <div className='dsh-voice-wave' ref={waveRef} aria-hidden='true' />
 
-      <div className='dsh-voice-hangup-wrap'>
+      <div className='dsh-voice-mic-wrap'>
         <span className='dsh-voice-halo dsh-voice-halo-red' ref={haloKeyRef} aria-hidden='true' />
         <button
           type='button'
-          className='dsh-voice-hangup'
+          className='dsh-voice-mickey'
+          data-muted={muted}
           ref={keyRef}
-          onClick={hangUp}
-          title='结束语音对话（Esc）'
-          aria-label='结束语音对话'
+          onClick={toggleMute}
+          title={muted ? '取消静音（恢复收录）' : '静音麦克风（不收录声音，不挂断）'}
+          aria-label='静音麦克风'
+          aria-pressed={muted}
         >
-          <svg width='26' height='26' viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
-            <path d='M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.17-.42.28-.68.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.5 2.48c-.18.18-.43.29-.71.29-.26 0-.5-.11-.68-.28-.79-.74-1.68-1.36-2.66-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z' />
-          </svg>
+          <MicGlyph off={muted} />
         </button>
       </div>
     </div>
   )
 }
 
-/** One stream message: user bubble right, assistant prose left. */
-function StreamMessage({ role, text }: { role: 'user' | 'assistant'; text: string }): ReactElement {
+/** Collapsible reasoning block (the native stream's "thinking" section). */
+const ReasoningSection = memo(function ReasoningSection({ text }: { text: string }): ReactElement {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className='dsh-voice-reasoning' data-open={open}>
+      <button type='button' className='dsh-voice-reasoning-head' onClick={() => setOpen(o => !o)}>
+        <i aria-hidden='true' />
+        已深度思考
+        <span className='dsh-voice-reasoning-toggle'>{open ? '收起' : '展开'}</span>
+      </button>
+      {open && <p className='dsh-voice-reasoning-body'>{text}</p>}
+    </div>
+  )
+})
+
+/** One tool card: call head (+args, expandable) or its settled result. */
+const ToolCard = memo(function ToolCard({ name, args, ok, text, running }: {
+  name: string
+  args?: string
+  ok?: boolean
+  text?: string
+  running?: boolean
+}): ReactElement {
+  const [open, setOpen] = useState(false)
+  const argsPreview = (args ?? '').split('\n')[0]?.slice(0, 90) ?? ''
+  const detail = (args ?? text ?? '')
+  return (
+    <div className='dsh-voice-tool' data-ok={ok} data-running={running === true}>
+      <button type='button' className='dsh-voice-tool-head' onClick={() => setOpen(o => !o)}>
+        <span className='dsh-voice-tool-status' aria-hidden='true'>
+          {running === true ? '◌' : ok === undefined ? '▸' : ok ? '✓' : '✗'}
+        </span>
+        <span className='dsh-voice-tool-name'>{name}</span>
+        {argsPreview !== '' && <code className='dsh-voice-tool-args'>{argsPreview}</code>}
+        {detail !== '' && <span className='dsh-voice-tool-toggle'>{open ? '收起' : '展开'}</span>}
+      </button>
+      {open && detail !== '' && <pre className='dsh-voice-tool-body'>{detail}</pre>}
+    </div>
+  )
+})
+
+/** Segments of one assistant message (or the live streaming bubble).
+ *  Text segments render through the markdown engine; the karaoke mark is a
+ *  raw offset into the message's JOINED prose (text segments joined with
+ *  '\n\n' — same space `proseOf` builds and the readout counts against), so
+ *  it is translated per segment here. */
+function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[]; mark: number }): ReactElement {
+  // Raw position of the NEXT text segment within the joined prose.
+  let acc = 0
+  return (
+    <>
+      {segments.map((segment, i) => {
+        if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
+        if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} />
+        if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
+        const start = acc
+        acc += segment.text.length + 2 // '\n\n' separator consumed by proseOf
+        const cut = mark < 0 ? -1 : Math.max(0, Math.min(mark - start, segment.text.length))
+        return <Markdown key={i} text={segment.text} mark={cut} />
+      })}
+    </>
+  )
+}
+
+/**
+ * One stream message: user bubble right, assistant prose left. Memoized —
+ * the transcript store reuses message objects while unchanged, so a
+ * streaming tick re-renders only the live bubble, not the whole history.
+ */
+const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }: {
+  role: 'user' | 'assistant'
+  text: string
+  segments: readonly TranscriptSegment[]
+  mark: number
+}): ReactElement {
   if (role === 'user') {
     return (
       <div className='dsh-voice-msg dsh-voice-msg-user'>
@@ -153,31 +254,31 @@ function StreamMessage({ role, text }: { role: 'user' | 'assistant'; text: strin
       </div>
     )
   }
-  const parts = splitCode(text)
   return (
     <div className='dsh-voice-msg dsh-voice-msg-ai'>
       <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
       <div className='dsh-voice-msg-body'>
-        {parts.length === 0
+        {segments.length === 0
           ? <span className='dsh-voice-msg-empty'>…</span>
-          : parts.map((part, i) => part.kind === 'code'
-            ? <pre key={i} className='dsh-voice-code'><code>{part.body}</code></pre>
-            : <p key={i} className='dsh-voice-prose'>{part.body}</p>)}
+          : <SegmentList segments={segments} mark={mark} />}
       </div>
     </div>
   )
-}
+})
 
 /**
  * The full-screen call stage, rendered only while the loop is armed.
  */
-export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
+export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
   const mode = useVoice(s => s.mode)
   const active = mode === 'loop'
   const phase = useVoice(s => s.phase)
   const interim = useVoice(s => s.interim)
   const pendingCount = useVoice(s => s.pendingCount)
   const error = useVoice(s => s.error)
+  const micMuted = useVoice(s => s.micMuted)
+  const spokenTurn = useVoice(s => s.spokenTurn)
+  const spokenChars = useVoice(s => s.spokenChars)
 
   // Duration of the CURRENT call: reset on every armed loop (hang-up → reopen
   // starts from 00:00), not the session's total age.
@@ -204,6 +305,16 @@ export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRat
   const streamState = useSyncExternalStore(subscribe, getSnapshot)
   const messages = streamState.messages
   const streaming = streamState.streaming
+  const runningTools = streamState.runningTools
+
+  // Karaoke marker: raw offset into the turn being read out. The text pieces
+  // the readout has handed to the engine are cleaned-character slices; map
+  // the played count back onto the rendered raw text.
+  const markOf = (turn: number): number =>
+    spokenTurn === null || spokenTurn !== turn ? -1 : rawPrefixForCleaned(
+      messages.find(m => m.turn === turn && m.role === 'assistant')?.text ?? '',
+      spokenChars,
+    )
 
   // Theme setup check: a cloud theme that still needs credentials surfaces a
   // caption instead of a confusing synth error mid-round.
@@ -249,21 +360,23 @@ export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRat
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
   const rate = settings().rate
+  const waveStyle = settings().waveStyle
 
   return createPortal(
-    <div className='dsh-voice-call' data-phase={phase}>
+    <div className={`dsh-voice-call${collapsed ? ' is-collapsed' : ''}`} data-phase={phase}>
       <aside className='dsh-voice-left'>
         <div className='dsh-voice-duration'>{mm}:{ss}</div>
 
-        <Hero useVoice={useVoice} hangUp={hangUp} phase={phase} />
+        <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} />
 
-        <div className='dsh-voice-state-word'>{PHASE_WORD[phase]}</div>
+        <div className='dsh-voice-state-word'>{phase === 'listening' && micMuted ? '已静音' : PHASE_WORD[phase]}</div>
 
         <div className='dsh-voice-live' aria-live='polite'>
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
           {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 点击底层页面卡片处理</div>}
-          {phase === 'listening' && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
+          {phase === 'listening' && micMuted && <div className='dsh-voice-live-warn'>麦克风已静音 — 点右侧麦克风恢复</div>}
+          {phase === 'listening' && !micMuted && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
           {phase !== 'listening' && (error === null && !setupMissing && pendingCount === 0) && (
             <div className='dsh-voice-live-hint'>{phase === 'thinking' ? '正在组织回复…' : phase === 'speaking' ? '正在播报' : '说话即发送'}</div>
           )}
@@ -286,6 +399,15 @@ export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRat
           >
             <span className='dsh-voice-ctl-value'>{nearestRateLabel(rate)}</span>
           </button>
+          <button
+            type='button'
+            className='dsh-voice-ctl dsh-voice-hangup-ctl'
+            onClick={hangUp}
+            title='结束语音对话（Esc）'
+            aria-label='结束语音对话'
+          >
+            <PhoneGlyph />
+          </button>
         </div>
 
         <div className='dsh-voice-hangup-row'>
@@ -302,33 +424,70 @@ export function CallOverlay({ useVoice, transcript, hangUp, stopSpeaking, setRat
 
       <section className='dsh-voice-right' aria-label='会话内容'>
         <div className='dsh-voice-stream' ref={streamRef} onScroll={onStreamScroll}>
-          {messages.map(m => <StreamMessage key={m.seq} role={m.role} text={m.text} />)}
-          {streaming !== '' && phase === 'thinking' && (
+          {messages.map(m => (
+            <StreamMessage
+              key={m.seq}
+              role={m.role}
+              text={m.text}
+              segments={m.segments}
+              mark={m.role === 'assistant' ? markOf(m.turn) : -1}
+            />
+          ))}
+          {/* Live partial shows whenever it streams — a multi-step turn keeps
+              generating after the first step, even while earlier audio plays. */}
+          {streaming.length > 0 && (
             <div className='dsh-voice-msg dsh-voice-msg-ai dsh-voice-streaming'>
               <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
               <div className='dsh-voice-msg-body'>
-                <p className='dsh-voice-prose'>{streaming}<span className='dsh-voice-caret' aria-hidden='true' /></p>
+                {streaming.map((segment, i) => {
+                  if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
+                  if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} running />
+                  if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
+                  // The caret rides the last live text run (streaming markdown
+                  // is never fully formed mid-generation; render it raw).
+                  const last = i === streaming.length - 1
+                  return (
+                    <p key={i} className='dsh-voice-prose'>
+                      {segment.text}{last && <span className='dsh-voice-caret' aria-hidden='true' />}
+                    </p>
+                  )
+                })}
               </div>
             </div>
           )}
-          {phase === 'thinking' && streaming === '' && (
+          {phase === 'thinking' && streaming.length === 0 && (
             <div className='dsh-voice-msg dsh-voice-msg-ai dsh-voice-typing-row'>
               <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
-              <div className='dsh-voice-typing' aria-label='正在生成'><i /><i /><i /></div>
+              <div className='dsh-voice-typing' aria-label='正在生成'>
+                <i /><i /><i />
+                {runningTools.length > 0 && (
+                  <span className='dsh-voice-typing-label'>正在调用 {runningTools.join(' · ')}</span>
+                )}
+              </div>
+            </div>
+          )}
+          {phase === 'thinking' && runningTools.length > 0 && (
+            <div className='dsh-voice-msg dsh-voice-msg-ai dsh-voice-running-row'>
+              <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
+              <div className='dsh-voice-msg-body'>
+                {runningTools.map(name => <ToolCard key={name} name={name} running />)}
+              </div>
             </div>
           )}
         </div>
-        <button
-          type='button'
-          className='dsh-voice-collapse'
-          title={collapsed ? '展开信息流' : '收起信息流'}
-          aria-label='收起或展开信息流'
-          aria-expanded={!collapsed}
-          onClick={() => setCollapsed(c => !c)}
-        >
-          <i />
-        </button>
       </section>
+      {/* Collapse handle lives at the stage level so it stays visible and
+          clickable when the right tile itself fades to zero width. */}
+      <button
+        type='button'
+        className='dsh-voice-collapse'
+        title={collapsed ? '展开信息流' : '收起信息流'}
+        aria-label='收起或展开信息流'
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <i />
+      </button>
     </div>,
     document.body,
   )

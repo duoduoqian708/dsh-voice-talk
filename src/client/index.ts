@@ -100,6 +100,7 @@ export function apply(ctx: ClientContext): void {
         transcript: controller.transcript,
         toggleVoice: () => controller.stopVoice(),
         hangUp: () => controller.stopVoice(),
+        toggleMute: () => controller.toggleMute(),
         stopSpeaking: () => controller.stopSpeaking(),
         setRateOverride: rate => controller.setSessionRate(rate),
         setVoiceOverride: voice => controller.setSessionSpeaker(voice),
@@ -108,7 +109,7 @@ export function apply(ctx: ClientContext): void {
         },
         settings: () => {
           const resolved = controller.effectiveSettings()
-          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme }
+          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle }
         },
       }),
     }, CallOverlay)
@@ -149,6 +150,7 @@ export function apply(ctx: ClientContext): void {
           else controller.startLoop()
         },
         hangUp: () => controller.stopVoice(),
+        toggleMute: () => controller.toggleMute(),
         stopSpeaking: () => controller.stopSpeaking(),
         setRateOverride: rate => controller.setSessionRate(rate),
         setVoiceOverride: voice => controller.setSessionSpeaker(voice),
@@ -157,7 +159,7 @@ export function apply(ctx: ClientContext): void {
         },
         settings: () => {
           const resolved = controller.effectiveSettings()
-          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme }
+          return { rate: resolved.rate, voiceName: resolved.voiceName, voiceLang: resolved.voiceLang, ttsTheme: resolved.ttsTheme, speakerByTheme: resolved.speakerByTheme, waveStyle: resolved.waveStyle }
         },
       }
     },
