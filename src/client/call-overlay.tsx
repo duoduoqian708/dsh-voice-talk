@@ -501,7 +501,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         <div className='dsh-voice-live' aria-live='polite'>
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
-          {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 点击底层页面卡片处理</div>}
+          {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 请语音回答</div>}
           {phase === 'listening' && !micMuted && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
           {phase !== 'listening' && (error === null && !setupMissing && pendingCount === 0) && (
             <div className='dsh-voice-live-hint'>{phase === 'thinking' ? '正在组织回复…' : phase === 'speaking' ? '正在播报' : '说话即发送'}</div>

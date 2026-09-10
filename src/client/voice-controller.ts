@@ -19,7 +19,7 @@ import { sessionFromSpeak } from './speech.ts'
 import { CloudRecognizer } from './asr.ts'
 import { cleanForSpeech, cleanStreamProse } from './readout.ts'
 export { cleanStreamProse } from './readout.ts'
-import { isStopCommand, looksLikeEcho } from './echo-guard.ts'
+import { isStopCommand, looksLikeEcho, normalizeForEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
@@ -105,6 +105,87 @@ export function assistantMessagesOf(snapshot: ConversationSnapshot): readonly As
 /** Count pending interaction cards (approvals, questions) on the session. */
 function pendingCountOf(snapshot: ConversationSnapshot): number {
   return snapshot.pending.length
+}
+
+/** One blocking wait from the snapshot (approval or question). */
+type PendingWait = ConversationSnapshot['pending'][number]
+/** One question of a pending question wait. */
+type PendingQuestion = Extract<PendingWait, { kind: 'question' }>['payload']['questions'][number]
+/** One selectable option of a pending question. */
+type PendingOption = NonNullable<PendingQuestion['options']>[number]
+
+/** Voice handling of one blocking interaction: announce → spoken answer →
+ *  protocol respond, after which the blocked turn resumes on its own. */
+interface PendingVoiceState {
+  readonly wait: PendingWait
+  /** Current question index inside the wait's batch (0 for approvals). */
+  qi: number
+  /** Collected answers keyed by question id (labels, or free text). */
+  readonly answers: Map<string, { selected: string[]; custom?: string }>
+  /** Picks collected so far for the CURRENT multi-select question. */
+  collected: string[]
+  /** Re-announcements issued for the current item (bounded). */
+  retries: number
+  /** True once the announcement finished and the mic awaits an answer. */
+  awaiting: boolean
+}
+
+const CN_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+
+/** Chinese ordinal for 1..10 (falls back to the digit). */
+function cnIndex(value: number): string {
+  return CN_NUMERALS[value - 1] ?? String(value)
+}
+
+/** 1-based option index named in the utterance ("1" / "一" / "第三个"), or null. */
+function spokenOptionIndex(text: string, count: number): number | null {
+  if (count <= 0) return null
+  const u = normalizeForEcho(text)
+  if (u === '') return null
+  for (let i = 1; i <= count && i <= CN_NUMERALS.length; i++) {
+    if (u === CN_NUMERALS[i - 1]) return i
+  }
+  for (const match of u.matchAll(/\d+/g)) {
+    const n = Number(match[0])
+    if (n >= 1 && n <= count) return n
+  }
+  for (let i = 1; i <= count && i <= CN_NUMERALS.length; i++) {
+    if (new RegExp(`(第|选|要|走|来)${CN_NUMERALS[i - 1]}(个|号|项)?`).test(u)) return i
+  }
+  for (const match of u.matchAll(/(?:第|选|要|走|来)(\d+)(?:个|号|项)?/g)) {
+    const n = Number(match[1])
+    if (n >= 1 && n <= count) return n
+  }
+  return null
+}
+
+/** Option labels the utterance names (containment either way), input order. */
+function spokenOptionLabels(text: string, options: readonly PendingOption[]): string[] {
+  const u = normalizeForEcho(text)
+  if (u === '') return []
+  const hits: string[] = []
+  for (const option of options) {
+    const label = normalizeForEcho(option.label)
+    if (label === '') continue
+    if (u.includes(label) || (u.length >= 2 && label.includes(u))) hits.push(option.label)
+  }
+  return hits
+}
+
+/** Approval verdict of the utterance; null when neither side is named. */
+function spokenApproval(text: string): 'allowed-once' | 'rejected' | null {
+  const u = normalizeForEcho(text)
+  if (u === '') return null
+  if (/不允许|拒绝|不行|不要|不同意|否|别|取消|no/i.test(u)) return 'rejected'
+  if (/允许|同意|批准|可以|行|好的|没问题|确定|ok|yes/i.test(u)) return 'allowed-once'
+  return null
+}
+
+/** A bare option-index answer ("1" / "一" / "第三个") — never a readout tail,
+ *  which always carries words after its index, so it bypasses the echo guard
+ *  during the answer window. */
+function isBareIndexCommand(text: string): boolean {
+  return /^(第?[一二三四五六七八九十]|\d+)(个|号|项)?$/.test(normalizeForEcho(text))
 }
 
 /** Plain text of one finalized node's blocks (text blocks joined). */
@@ -265,6 +346,10 @@ export class VoiceController {
   #replyTimer: ReturnType<typeof setTimeout> | null = null
   #echoMuteTimer: ReturnType<typeof setTimeout> | null = null
   #pendingFinal: string | null = null
+  /** Voice follow-up for a blocking approval/question (see #checkPending). */
+  #pendingVoice: PendingVoiceState | null = null
+  /** Waits already responded to; skipped until the snapshot drops them. */
+  readonly #resolvedWaits = new Set<string>()
   #lastSpokenSeq = 0
   #speaking = false
   #speakingSince = 0
@@ -305,6 +390,7 @@ export class VoiceController {
         this.status.patch({ pendingCount: count })
       }
       this.#syncTranscript()
+      this.#checkPending()
     })
   }
 
@@ -322,6 +408,8 @@ export class VoiceController {
     this.#lastSpokenSeq = this.#latestAssistantSeq()
     this.status.patch({ mode: 'loop', error: null, lastPrompt: '' })
     this.#armListening()
+    // Entering with a blocking wait already pending: handle it right away.
+    this.#checkPending()
   }
 
   /** Leave any voice activity: stop everything and go idle (pure off switch). */
@@ -534,11 +622,19 @@ export class VoiceController {
     // own tail (playback "ended" but audio is still in the air). Run the echo
     // guard against the last readout for a short window.
     if (Date.now() < this.#spokenTailUntil && this.#spokenTail !== null) {
-      if (looksLikeEcho(text, this.#spokenTail)) {
+      // A bare option index is a plausible fast answer, never a tail capture
+      // (the tail always carries words after its index) — let it through.
+      if (looksLikeEcho(text, this.#spokenTail) && !(this.#pendingVoice !== null && isBareIndexCommand(text))) {
         this.#muteAfterEcho()
         return
       }
       this.#spokenTailUntil = 0
+    }
+    // A blocking interaction owns the mic while it waits: the answer goes to
+    // the matcher → protocol respond, never into the composer.
+    if (this.#pendingVoice !== null || this.#deps.readSnapshot().pending.length > 0) {
+      this.#handlePendingAnswer(text)
+      return
     }
     // Accumulate finalized text; the silence timer flushes it as one prompt.
     this.#pendingFinal = this.#pendingFinal === null ? text : `${this.#pendingFinal}，${text}`
@@ -602,6 +698,227 @@ export class VoiceController {
     if (this.status.getSnapshot().mode !== 'loop') return
     if (text === null || text.length < MIN_UTTERANCE_CHARS) return
     this.#submitUtterance(text)
+  }
+
+  // ---- blocking interactions: speak the ask, match the spoken answer -------
+
+  /** Snapshot watch: start (or retire) voice handling for pending waits. */
+  #checkPending(): void {
+    const waits = this.#deps.readSnapshot().pending
+    if (this.#resolvedWaits.size > 0) {
+      const keys = new Set(waits.map(wait => wait.key))
+      for (const key of [...this.#resolvedWaits]) if (!keys.has(key)) this.#resolvedWaits.delete(key)
+    }
+    const active = this.#pendingVoice
+    if (active !== null) {
+      // Resolved elsewhere (native card, another tab): drop the voice flow
+      // and hand the loop back to the reply watch.
+      if (!waits.some(wait => wait.key === active.wait.key)) {
+        this.#pendingVoice = null
+        if (this.status.getSnapshot().mode === 'loop') {
+          this.status.patch({ phase: 'thinking' })
+          this.#bumpReplyTimer()
+        }
+      }
+      return
+    }
+    if (this.status.getSnapshot().mode !== 'loop') return
+    const wait = waits.find(candidate => !this.#resolvedWaits.has(candidate.key))
+    if (wait === undefined) return
+    this.#pendingVoice = { wait, qi: 0, answers: new Map(), collected: [], retries: 0, awaiting: false }
+    void this.#announcePending()
+  }
+
+  /** The question currently being asked (questions only; null for approvals). */
+  #pendingQuestion(): PendingQuestion | null {
+    const state = this.#pendingVoice
+    if (state === null || state.wait.kind !== 'question') return null
+    return state.wait.payload.questions[state.qi] ?? null
+  }
+
+  /** Spoken form of the item at the head of the active wait. */
+  #pendingAnnouncement(): string {
+    const state = this.#pendingVoice
+    if (state === null) return ''
+    const wait = state.wait
+    if (wait.kind === 'approval') {
+      const reason = wait.payload.reason !== undefined && wait.payload.reason !== '' ? `，原因：${wait.payload.reason}` : ''
+      return `工具「${wait.payload.toolName}」请求执行${reason}。允许请说「允许」，拒绝请说「拒绝」。`
+    }
+    const questions = wait.payload.questions
+    const item = questions[state.qi]
+    if (item === undefined) return ''
+    const parts: string[] = []
+    if (questions.length > 1) parts.push(`第${cnIndex(state.qi + 1)}个问题`)
+    parts.push(item.question)
+    const options = item.options ?? []
+    options.forEach((option, i) => parts.push(`第${cnIndex(i + 1)}个，${option.label}`))
+    if (options.length === 0) parts.push('请直接说出你的答案')
+    else if (item.multiSelect === true) parts.push('可以多选，选好后说「好了」提交')
+    else if (item.intent?.kind === 'plan-review') parts.push('通过请说「通过」，不同意请说「拒绝」')
+    else parts.push('你想选哪个？')
+    return parts.join('。')
+  }
+
+  /** Announce the current item (optional prefix), then listen for the answer. */
+  async #announcePending(prefix = ''): Promise<void> {
+    const state = this.#pendingVoice
+    if (state === null) return
+    // The prose that preceded the ask flushes first (it may be mid-sentence).
+    if (this.status.getSnapshot().phase === 'thinking') this.#flushStreamSentences(true)
+    const text = `${prefix}${this.#pendingAnnouncement()}`
+    if (text === '') return
+    await this.#pendingSpeak(text, state)
+  }
+
+  /** One announcement through the shared synthesis path, then re-arm the mic. */
+  async #pendingSpeak(text: string, state: PendingVoiceState): Promise<void> {
+    // A human is answering: the stuck-turn timer must not fire meanwhile.
+    if (this.#replyTimer !== null) {
+      clearTimeout(this.#replyTimer)
+      this.#replyTimer = null
+    }
+    this.#recognitionHandle?.stop()
+    this.#recognitionHandle = null
+    const session = this.#ensureSession()
+    if (session !== null) {
+      this.status.patch({ phase: 'speaking' })
+      this.#speaking = true
+      this.#speakingSince = Date.now()
+      this.#spokenText = text
+      session.push(text)
+      session.done()
+      this.#session = null
+      try { await session.finished } catch (error) {
+        this.#notifyError(error instanceof Error ? error.message : String(error))
+      }
+      this.#endSpeaking()
+    }
+    this.#spokenText = null
+    // The spoken ask is the echo reference for the answer window: the room
+    // hears it too, and a re-captured option must not count as a pick. The
+    // window is short — a person answers well after a 1s tail decays.
+    this.#spokenTail = text
+    this.#spokenTailUntil = Date.now() + 1_000
+    if (this.#disposed || this.status.getSnapshot().mode !== 'loop') return
+    if (this.#pendingVoice !== state) return
+    state.awaiting = true
+    this.status.patch({ phase: 'listening', interim: '', caption: '' })
+    this.#startRecognition()
+  }
+
+  /** A spoken final while a wait is active: match → respond, or re-ask. */
+  #handlePendingAnswer(text: string): void {
+    const state = this.#pendingVoice
+    if (state === null) {
+      this.#checkPending()
+      return
+    }
+    const wait = state.wait
+    if (wait.kind === 'approval') {
+      const outcome = spokenApproval(text)
+      if (outcome === null) {
+        this.#reaskPending()
+        return
+      }
+      this.#respondWait(wait, {
+        ok: true,
+        value: { sessionId: wait.sessionId, approvalId: wait.payload.approvalId, outcome },
+      })
+      return
+    }
+    const item = this.#pendingQuestion()
+    if (item === null) return
+    const options = item.options ?? []
+    const normalized = normalizeForEcho(text)
+    const done = /^(好了|就这些|就这样|确定|确认|提交|完成|可以了|没问题)$/.test(normalized)
+    if (options.length === 0) {
+      // Free-text question: the answer is the utterance itself.
+      this.#commitPendingAnswer(state, item, { selected: [], custom: text })
+      return
+    }
+    let picks: string[] = []
+    if (item.intent?.kind === 'plan-review') {
+      const approve = item.intent.approve
+      if (/通过|同意|批准|可以|没问题/.test(normalized)) picks = [approve]
+      else if (/拒绝|不行|不同意|否|不接受/.test(normalized)) {
+        const other = options.find(option => option.label !== approve)
+        if (other !== undefined) picks = [other.label]
+      }
+    }
+    if (picks.length === 0) {
+      const index = spokenOptionIndex(text, options.length)
+      if (index !== null) picks = [options[index - 1]!.label]
+      else picks = spokenOptionLabels(text, options)
+    }
+    if (item.multiSelect === true) {
+      for (const label of picks) if (!state.collected.includes(label)) state.collected.push(label)
+      if (state.collected.length > 0 && done) {
+        this.#commitPendingAnswer(state, item)
+        return
+      }
+      if (picks.length > 0) {
+        const rest = item.multiSelect === true ? '继续说，或者说「好了」提交。' : ''
+        void this.#pendingSpeak(`已记住${picks.join('和')}。${rest}`, state)
+        return
+      }
+      this.#reaskPending()
+      return
+    }
+    if (picks.length > 0) {
+      this.#commitPendingAnswer(state, item, { selected: [picks[0]!] })
+      return
+    }
+    this.#reaskPending()
+  }
+
+  /** Record one answer; advance to the next question or respond the wait. */
+  #commitPendingAnswer(state: PendingVoiceState, item: PendingQuestion, answer?: { selected: string[]; custom?: string }): void {
+    const resolved = answer ?? {
+      selected: (item.options ?? []).map(option => option.label).filter(label => state.collected.includes(label)),
+    }
+    state.answers.set(item.id, resolved)
+    state.collected = []
+    state.retries = 0
+    const wait = state.wait
+    if (wait.kind !== 'question') return
+    const questions = wait.payload.questions
+    if (state.qi + 1 < questions.length) {
+      state.qi += 1
+      void this.#announcePending()
+      return
+    }
+    const answers = questions.map(question => {
+      const held = state.answers.get(question.id)
+      return held === undefined ? { id: question.id, selected: [] } : { id: question.id, ...held }
+    })
+    this.#respondWait(wait, { ok: true, value: { sessionId: wait.sessionId, answer: { answers } } })
+  }
+
+  /** Re-announce the current item (bounded) so a missed answer can retry. */
+  #reaskPending(): void {
+    const state = this.#pendingVoice
+    if (state === null || state.retries >= 2) return
+    state.retries += 1
+    void this.#announcePending('没听清，请再说一次。')
+  }
+
+  /** Send the protocol response and hand the loop back to the reply watch. */
+  #respondWait(wait: PendingWait, result: { ok: true; value: unknown }): void {
+    this.#pendingVoice = null
+    this.#resolvedWaits.add(wait.key)
+    try {
+      void wait.respond(result).catch(error => {
+        this.#notifyError(error instanceof Error ? error.message : String(error))
+      })
+    } catch (error) {
+      this.#notifyError(error instanceof Error ? error.message : String(error))
+    }
+    // The turn resumes once the host settles the wait: back to the watch; the
+    // resumed prose opens a fresh synthesis session on its own.
+    if (this.#disposed || this.status.getSnapshot().mode !== 'loop') return
+    this.status.patch({ phase: 'thinking' })
+    this.#bumpReplyTimer()
   }
 
   // ---- submission + readout chain ------------------------------------------
@@ -859,6 +1176,8 @@ export class VoiceController {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#speaker().cancel()
+    this.#pendingVoice = null
+    this.#resolvedWaits.clear()
     this.#clearUtterance()
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
