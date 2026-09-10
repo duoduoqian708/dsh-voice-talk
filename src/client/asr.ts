@@ -16,7 +16,7 @@
 // everything for real — socket closed, mic tracks stopped, no restart
 // timers (the post-hang-up capture bug was born from breaking that rule).
 
-import type { RecognitionEvents, RecognitionHandle, Recognizer } from './speech.ts'
+import type { RecognitionEvents, RecognitionHandle, Recognizer, RecognizerStartOptions } from './speech.ts'
 
 export type AsrVendor = 'qwen' | 'xfyun'
 
@@ -95,7 +95,7 @@ export class CloudRecognizer implements Recognizer {
       && typeof WebSocket !== 'undefined'
   }
 
-  start(events: RecognitionEvents): RecognitionHandle | null {
+  start(events: RecognitionEvents, opts?: RecognizerStartOptions): RecognitionHandle | null {
     let disposed = false
     let restarting = false
     let restartAttempt = 0
@@ -107,6 +107,14 @@ export class CloudRecognizer implements Recognizer {
     let audioCtx: AudioContext | null = null
     let speechActive = false
     let speechAt = 0
+    // The settings ride hello: the bridge resolves credentials and the model
+    // per connection, so a changed 模型 ID lands on the next utterance.
+    const hello = JSON.stringify({
+      type: 'hello',
+      lang: opts?.lang?.trim() || navigator.language,
+      model: opts?.model,
+      endpoint: opts?.endpoint,
+    })
 
     const bridgeUrl = (): string => {
       const proto = typeof location !== 'undefined' && location.protocol === 'https:' ? 'wss' : 'ws'
@@ -184,7 +192,7 @@ export class CloudRecognizer implements Recognizer {
       const ws = new WebSocket(bridgeUrl())
       socket = ws
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'hello', lang: navigator.language }))
+        ws.send(hello)
       }
       ws.onmessage = event => {
         if (typeof event.data === 'string') handleUpstream(event.data)

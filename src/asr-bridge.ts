@@ -207,7 +207,7 @@ interface IatResultFrame {
  * ride base64 data frames, result pieces accumulate into the running
  * utterance (the engine ends the turn on its own after the eos silence).
  */
-async function openXfyunUpstream(ctx: Context, lang: string, handlers: AsrUpstreamHandlers): Promise<AsrUpstream> {
+async function openXfyunUpstream(ctx: Context, lang: string, endpointOverride: string | undefined, handlers: AsrUpstreamHandlers): Promise<AsrUpstream> {
   const creds = ctx.get('credentials')
   if (creds === undefined) throw new Error('凭证服务不可用')
   const [appId, apiKey, apiSecret] = await Promise.all([
@@ -221,7 +221,7 @@ async function openXfyunUpstream(ctx: Context, lang: string, handlers: AsrUpstre
   const { WebSocket } = await import('ws')
   // Same HMAC-SHA256 handshake scheme the TTS bridge signs (authorization /
   // date / host query params from host:date/request-line).
-  const base = new URL('wss://iat-api.xfyun.cn/v2/iat')
+  const base = new URL(endpointOverride?.trim() || 'wss://iat-api.xfyun.cn/v2/iat')
   const host = base.hostname
   const date = new Date().toUTCString()
   const signatureOrigin = `host: ${host}\ndate: ${date}\nGET ${base.pathname} HTTP/1.1`
@@ -411,7 +411,7 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
                 model: frame.model,
                 endpoint: frame.endpoint,
               }, upstreamOut)
-              : await openXfyunUpstream(ctx, lang, upstreamOut)
+              : await openXfyunUpstream(ctx, lang, frame.endpoint, upstreamOut)
             sendJson({ type: 'ready' })
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)

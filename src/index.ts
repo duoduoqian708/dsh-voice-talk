@@ -49,6 +49,12 @@ export interface Config {
   waveStyle?: string
   /** Which registered ASR engine listens ('qwen' | 'xfyun'). */
   asrTheme?: string
+  /** DashScope streaming ASR model id (qwen3-asr-flash-realtime preset). */
+  asrQwenModel?: string
+  /** DashScope realtime ASR WS endpoint. */
+  asrQwenEndpoint?: string
+  /** iFlytek iat WS endpoint. */
+  asrXfyunEndpoint?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -68,6 +74,9 @@ export const Config: z<Config> = z.object({
   xfyunEndpoint: z.string().default('wss://tts-api.xfyun.cn/v2/tts'),
   waveStyle: z.string().default('wave'),
   asrTheme: z.string().default('qwen'),
+  asrQwenModel: z.string().default('qwen3-asr-flash-realtime'),
+  asrQwenEndpoint: z.string().default('wss://dashscope.aliyuncs.com/api-ws/v1/realtime'),
+  asrXfyunEndpoint: z.string().default('wss://iat-api.xfyun.cn/v2/iat'),
 })
 
 /**

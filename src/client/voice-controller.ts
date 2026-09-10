@@ -419,6 +419,7 @@ export class VoiceController {
       this.#degradeToIdle()
       return
     }
+    const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
       onInterim: interim => this.status.patch({ interim }),
       onFinal: text => this.#onFinalUtterance(text),
@@ -430,6 +431,11 @@ export class VoiceController {
           this.#degradeToIdle()
         }
       },
+    }, {
+      // Per-arm options: a changed 模型 ID / endpoint lands on the next arm.
+      lang: settings.voiceLang,
+      model: settings.asrTheme === 'xfyun' ? undefined : settings.asrQwenModel,
+      endpoint: settings.asrTheme === 'xfyun' ? settings.asrXfyunEndpoint : settings.asrQwenEndpoint,
     })
     if (this.#recognitionHandle === null) this.#degradeToIdle()
   }

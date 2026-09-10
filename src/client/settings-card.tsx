@@ -7,7 +7,7 @@ import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { VoiceSettings } from './voice-settings.ts'
-import { listVoiceThemes, speakersForTheme, type VoiceTheme } from './voice-themes.ts'
+import { listVoiceThemes, speakersForTheme, voiceThemeOf, type VoiceTheme } from './voice-themes.ts'
 
 /** Card state: the resolved section plus which fields the user overrode. */
 export interface VoiceCardState {
@@ -215,10 +215,28 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
 }
 
 /** The listening engines: same credential refs as their 说 twins share. */
-const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[] }[] = [
-  { id: 'qwen', label: '千问听写', refs: ['VOICE_QWEN_API_KEY'] },
-  { id: 'xfyun', label: '讯飞听写', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'] },
+const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }[] = [
+  {
+    id: 'qwen', label: '千问听写', refs: ['VOICE_QWEN_API_KEY'],
+    note: '复用 DashScope API Key（与说共用同一凭证）',
+  },
+  {
+    id: 'xfyun', label: '讯飞听写', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
+    note: '听写需在讯飞控制台开通「语音听写（流式版）」服务（每日免费 500 次）',
+    setupUrl: 'https://console.xfyun.cn/services/iat',
+  },
 ]
+
+/** The 听 modal's per-engine settings fields (model/endpoint override). */
+const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string }[]> = {
+  qwen: [
+    { field: 'asrQwenModel', label: '模型 ID', hint: 'qwen3-asr-flash-realtime / qwen-audio-3.0-asr-flash-streaming 等' },
+    { field: 'asrQwenEndpoint', label: '接口地址' },
+  ],
+  xfyun: [
+    { field: 'asrXfyunEndpoint', label: '接口地址' },
+  ],
+}
 
 /**
  * One listening-engine row: pick the ASR engine the loop's recognizer uses.
@@ -227,16 +245,20 @@ const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]
  * cache first, describe() IPC only when it misses.
  */
 function AsrRow({
-  engine, value, credentials, refreshKey, disabled, onActivate,
+  engine, value, credentials, set, refreshKey, disabled, onActivate, onRefresh,
 }: {
-  engine: { id: string; label: string; refs: readonly string[] }
+  engine: { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }
   value: Required<VoiceSettings>
   credentials: VoiceCardProps['credentials']
+  set(field: string, value: unknown): void
   refreshKey: number
   disabled: boolean
   onActivate(): void
+  onRefresh(): void
 }): ReactElement {
+  const refs = ASR_CREDENTIAL_REFS[engine.id] ?? EMPTY_REFS
   const [configured, setConfigured] = useState<boolean | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
 
   useEffect(() => {
     const cacheKey = `asr:${engine.id}`
@@ -258,20 +280,57 @@ function AsrRow({
 
   const active = value.asrTheme === engine.id
   const statusWord = configured === null ? '检查凭证中…' : configured ? (active ? '当前启用' : '凭证已配置') : '凭证未配置'
+  const pseudoTheme = voiceThemeOf(engine.id) ?? voiceThemeOf('system')!
   return (
-    <button type='button' className='dsh-voice-engine-row' disabled={disabled} onClick={onActivate}>
-      <span className='dsh-voice-engine-info'>
-        <span className='dsh-voice-engine-line'>
+    <div className='dsh-voice-engine-row'>
+      <div className='dsh-voice-engine-info'>
+        <div className='dsh-voice-engine-line'>
           <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{engine.label}</span>
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
-        </span>
-        {active && <span className='dsh-voice-engine-note'>说话限时 60 秒，停顿自动发送</span>}
-      </span>
-      <span className='dsh-voice-provider-actions'>
-        <span className={`dsh-voice-provider-btn${active ? ' is-primary' : ''}`}>{active ? '已启用' : '启用'}</span>
-      </span>
-    </button>
+        </div>
+        {active && <p className='dsh-voice-engine-note'>说话限时 60 秒，停顿自动发送</p>}
+      </div>
+      <div className='dsh-voice-provider-actions'>
+        <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
+          onClick={onActivate}>
+          {active ? '已启用' : '启用'}
+        </button>
+        <button type='button' className='dsh-voice-provider-btn' onClick={() => setModalOpen(true)}>
+          设置
+        </button>
+      </div>
+      {modalOpen && (
+        <ProviderModal
+          theme={pseudoTheme}
+          value={value}
+          credentials={credentials}
+          set={set}
+          onRefresh={onRefresh}
+          onClose={() => setModalOpen(false)}
+          variant={{
+            title: engine.label,
+            refs,
+            fields: ASR_MODAL_FIELDS[engine.id] ?? [],
+            note: engine.note,
+            setupUrl: engine.setupUrl,
+            tryListen: false,
+          }}
+        />
+      )}
+    </div>
   )
+}
+
+/** Credential display spec per 听 engine id (mirrors the 说 twins' refs). */
+const ASR_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: string; mask: boolean }[]> = {
+  qwen: [
+    { ref: 'VOICE_QWEN_API_KEY', label: 'DashScope API Key', mask: true },
+  ],
+  xfyun: [
+    { ref: 'VOICE_XF_APP_ID', label: 'APPID', mask: false },
+    { ref: 'VOICE_XF_API_SECRET', label: 'API Secret', mask: true },
+    { ref: 'VOICE_XF_API_KEY', label: 'API Key', mask: true },
+  ],
 }
 
 /** One engine row inside the unified panel: name + status + actions. */
@@ -361,8 +420,19 @@ function EngineRow({
  *  Filling a credential saves it on blur (no manual 保存): the page then shows
  *  the saved APPID in full and head/tail of the two keys, since the credential
  *  store only ever reports "configured" — never the value back. */
+/** Non-TTS modality override for the shared modal (the 听 rows use it). */
+interface ProviderModalVariant {
+  title: string
+  refs: readonly { ref: string; label: string; mask: boolean }[]
+  fields: readonly { field: string; label: string; hint?: string }[]
+  note?: string
+  setupUrl?: string
+  /** false hides the TTS-only 试听 section (speaker + prompt + buttons). */
+  tryListen?: boolean
+}
+
 function ProviderModal({
-  theme, value, credentials, set, onRefresh, onClose,
+  theme, value, credentials, set, onRefresh, onClose, variant,
 }: {
   theme: VoiceTheme
   value: Required<VoiceSettings>
@@ -370,9 +440,11 @@ function ProviderModal({
   set(field: string, value: unknown): void
   onRefresh(): void
   onClose(): void
+  /** Set for the 听 rows: their tables + no TTS try-listen. */
+  variant?: ProviderModalVariant
 }): ReactElement {
-  const refs = THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
-  const fields = THEME_MODAL_FIELDS[theme.id] ?? []
+  const refs = variant?.refs ?? THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
+  const fields = variant?.fields ?? THEME_MODAL_FIELDS[theme.id] ?? []
   const speakers = speakersForTheme(theme.id, value.voiceLang)
   const savedSpeaker = value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? ''
   const [credState, setCredState] = useState<Record<string, boolean>>({})
@@ -460,12 +532,12 @@ function ProviderModal({
     <div className='dsh-voice-modal-veil' onClick={onClose}>
       <div className='dsh-voice-modal' onClick={event => event.stopPropagation()}>
       <div className='dsh-voice-modal-head'>
-        <h4 className='dsh-voice-modal-title'>{theme.label.replace(/（.*?）/, '')}</h4>
+        <h4 className='dsh-voice-modal-title'>{variant?.title ?? theme.label.replace(/（.*?）/, '')}</h4>
         <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label='关闭'>✕</button>
       </div>
-      {theme.setupUrl !== undefined && (
+      {(variant?.setupUrl ?? theme.setupUrl) !== undefined && (
         <p className='dsh-voice-setup-note'>
-          {theme.note} <a href={theme.setupUrl} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>注册并获取密钥 ↗</a>
+          {variant?.note ?? theme.note} <a href={(variant?.setupUrl ?? theme.setupUrl)!} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>注册并获取密钥 ↗</a>
         </p>
       )}
       {(refs.length > 0 || fields.length > 0) && <div className='dsh-voice-modal-divider'>服务配置</div>}
@@ -505,6 +577,7 @@ function ProviderModal({
             />
           </label>
         ))}
+        {variant?.tryListen !== false && (<>
         <div className='dsh-voice-modal-divider'>试听</div>
         <label className='dsh-voice-row'>
           <span className='dsh-voice-row-label'>音色</span>
@@ -541,6 +614,7 @@ function ProviderModal({
         <div className='dsh-voice-provider-actions'>
           <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
         </div>
+        </>)}
         <div className='dsh-voice-modal-footer'>
           <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
           {message !== null && <span className='dsh-voice-setup-ok'>{message}</span>}
@@ -677,9 +751,11 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
               engine={engine}
               value={value}
               credentials={credentials}
+              set={set}
               refreshKey={voicesTick}
               disabled={disabled}
               onActivate={() => { if (!disabled) set('asrTheme', engine.id) }}
+              onRefresh={() => { configuredCache.clear(); tickVoices(n => n + 1) }}
             />
           ))}
         </div>

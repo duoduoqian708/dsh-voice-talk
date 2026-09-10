@@ -25,6 +25,12 @@ export interface VoiceSettings {
   waveStyle?: string
   /** Which registered ASR engine listens ('qwen' | 'xfyun'). */
   asrTheme?: string
+  /** DashScope streaming ASR model id (the 听 modal's 模型 ID). */
+  asrQwenModel?: string
+  /** DashScope realtime ASR WS endpoint. */
+  asrQwenEndpoint?: string
+  /** iFlytek iat WS endpoint. */
+  asrXfyunEndpoint?: string
 }
 
 /** Defaults matching the host schema, applied when a field is absent. */
@@ -43,6 +49,9 @@ export const VOICE_DEFAULTS: Required<VoiceSettings> = {
   xfyunEndpoint: 'wss://tts-api.xfyun.cn/v2/tts',
   waveStyle: 'wave',
   asrTheme: 'qwen',
+  asrQwenModel: 'qwen3-asr-flash-realtime',
+  asrQwenEndpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
+  asrXfyunEndpoint: 'wss://iat-api.xfyun.cn/v2/iat',
 }
 
 /** Magnet stops of the rate slider (all within every vendor's hard cap). */
@@ -80,5 +89,8 @@ export function resolveSettings(section: VoiceSettings | undefined): Required<Vo
     xfyunEndpoint: value.xfyunEndpoint ?? VOICE_DEFAULTS.xfyunEndpoint,
     waveStyle: value.waveStyle ?? VOICE_DEFAULTS.waveStyle,
     asrTheme: value.asrTheme ?? VOICE_DEFAULTS.asrTheme,
+    asrQwenModel: value.asrQwenModel ?? VOICE_DEFAULTS.asrQwenModel,
+    asrQwenEndpoint: value.asrQwenEndpoint ?? VOICE_DEFAULTS.asrQwenEndpoint,
+    asrXfyunEndpoint: value.asrXfyunEndpoint ?? VOICE_DEFAULTS.asrXfyunEndpoint,
   }
 }

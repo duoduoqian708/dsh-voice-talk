@@ -26,11 +26,22 @@ export interface Recognizer {
   /**
    * Start listening. The engine keeps firing final/interim events until
    * {@link Recognizer.stop} or an onEnd; the caller restarts after onEnd to
-   * stay armed.
+   * stay armed. Opts (per arm, not per recognizer): the cloud vendor picks
+   * up lang/model/endpoint from the settings at arm time.
    */
-  start(events: RecognitionEvents): RecognitionHandle | null
+  start(events: RecognitionEvents, opts?: RecognizerStartOptions): RecognitionHandle | null
   /** True when the browser exposes mic capture and WebSocket transport. */
   supported(): boolean
+}
+
+/** Per-arm recognition options (settings-derived, read fresh each arm). */
+export interface RecognizerStartOptions {
+  /** BCP-47 language tag the recognition should use (settings.voiceLang). */
+  lang?: string
+  /** Cloud model id (settings.asrQwenModel). */
+  model?: string
+  /** Vendor WS endpoint override (settings.asr*Endpoint). */
+  endpoint?: string
 }
 
 /** Synthesis options a voice theme may consume (theme-private extras allowed). */
