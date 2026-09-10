@@ -56,7 +56,7 @@ registerVoiceTheme({
 
 registerVoiceTheme({
   id: 'qwen',
-  label: '阿里千问',
+  label: '千问',
   create: () => new QwenRealtimeTtsProvider(),
   needsSetup: true,
   note: '约 1 元 / 万字符',

@@ -59,10 +59,10 @@ const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: strin
 const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
   qwen: [
     { field: 'qwenModel', label: '模型 ID', placeholder: 'qwen3-tts-flash-realtime' },
-    { field: 'qwenEndpoint', label: '接口地址' },
+    { field: 'qwenEndpoint', label: '接口地址', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
   ],
   xfyun: [
-    { field: 'xfyunEndpoint', label: '接口地址' },
+    { field: 'xfyunEndpoint', label: '接口地址', placeholder: 'wss://tts-api.xfyun.cn/v2/tts' },
   ],
 }
 
@@ -219,11 +219,11 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
 /** The listening engines: same credential refs as their 说 twins share. */
 const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }[] = [
   {
-    id: 'qwen', label: '千问听写', refs: ['VOICE_QWEN_API_KEY'],
+    id: 'qwen', label: '千问', refs: ['VOICE_QWEN_API_KEY'],
     note: '复用 DashScope API Key（与说共用同一凭证）',
   },
   {
-    id: 'xfyun', label: '讯飞听写', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
+    id: 'xfyun', label: '讯飞', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
     note: '听写需在讯飞控制台开通「语音听写（流式版）」服务（每日免费 500 次）',
     setupUrl: 'https://console.xfyun.cn/services/iat',
   },
@@ -233,10 +233,10 @@ const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]
 const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
   qwen: [
     { field: 'asrQwenModel', label: '模型 ID', placeholder: 'qwen3-asr-flash-realtime' },
-    { field: 'asrQwenEndpoint', label: '接口地址' },
+    { field: 'asrQwenEndpoint', label: '接口地址', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
   ],
   xfyun: [
-    { field: 'asrXfyunEndpoint', label: '接口地址' },
+    { field: 'asrXfyunEndpoint', label: '接口地址', placeholder: 'wss://iat-api.xfyun.cn/v2/iat' },
   ],
 }
 
