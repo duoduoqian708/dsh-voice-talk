@@ -357,6 +357,9 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const micMuted = useVoice(s => s.micMuted)
   const spokenTurn = useVoice(s => s.spokenTurn)
   const spokenChars = useVoice(s => s.spokenChars)
+  // Hooks stay above the `mode !== 'loop'` early return — a conditional hook
+  // crashes the overlay on the loop-on render (mic click looked dead).
+  const utteranceStartAt = useVoice(s => s.utteranceStartAt)
 
   // Duration of the CURRENT call: reset on every armed loop (hang-up → reopen
   // starts from 00:00), not the session's total age.
@@ -439,7 +442,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const ss = String(elapsed % 60).padStart(2, '0')
   const rate = settings().rate
   const waveStyle = settings().waveStyle
-  const utteranceStartAt = useVoice(s => s.utteranceStartAt)
 
   return createPortal(
     <div className={`dsh-voice-call${collapsed ? ' is-collapsed' : ''}`} data-phase={phase}>
