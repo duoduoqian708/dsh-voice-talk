@@ -267,6 +267,36 @@ const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }
 })
 
 /**
+ * Rate cycler: the five magnet stops. The label echoes locally — the session
+ * rate override lives outside the voice snapshot, so without this echo the
+ * label would only refresh on the next unrelated re-render (the duration
+ * timer backstops it at 500ms). Cycling reads the local echo too, so rapid
+ * clicks step 1.0→1.2→1.5 instead of replaying a stale prop.
+ */
+function RateButton({ rate, onCycle }: { rate: number; onCycle(next: number): void }): ReactElement {
+  // The prop is only the mount-time seed: the controls remount per call
+  // entry, so a session rate that survived a hang-up re-syncs here.
+  const [shown, setShown] = useState(rate)
+  return (
+    <button
+      type='button'
+      className='dsh-voice-ctl dsh-voice-rate'
+      title={`语速（仅本会话）：${nearestRateLabel(shown)}`}
+      onClick={() => {
+        const stops = [1.0, 1.2, 1.5, 1.8, 2.0]
+        const next = stops[(stops.indexOf(Math.round(shown * 10) / 10) + 1) % stops.length]
+          ?? stops.find(s => s > shown)!
+          ?? stops[0]!
+        onCycle(next)
+        setShown(next)
+      }}
+    >
+      <span className='dsh-voice-ctl-value'>{nearestRateLabel(shown)}</span>
+    </button>
+  )
+}
+
+/**
  * The full-screen call stage, rendered only while the loop is armed.
  */
 export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
@@ -383,22 +413,8 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         </div>
 
         <div className='dsh-voice-controls'>
-          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} />
-          <button
-            type='button'
-            className='dsh-voice-ctl dsh-voice-rate'
-            title={`语速（仅本会话）：${nearestRateLabel(rate)}`}
-            onClick={() => {
-              // Cycle the five magnet stops; writes the session override.
-              const stops = [1.0, 1.2, 1.5, 1.8, 2.0]
-              const next = stops[(stops.indexOf(Math.round(rate * 10) / 10) + 1) % stops.length]
-                ?? stops.find(s => s > rate)!
-                ?? stops[0]!
-              setRateOverride(next)
-            }}
-          >
-            <span className='dsh-voice-ctl-value'>{nearestRateLabel(rate)}</span>
-          </button>
+          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} />
+          <RateButton rate={rate} onCycle={setRateOverride} />
           <button
             type='button'
             className='dsh-voice-ctl dsh-voice-hangup-ctl'
@@ -493,14 +509,20 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   )
 }
 
-/** Speaker picker: roster follows the active theme. */
-function SpeakerPicker({ settings, setVoiceOverride }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void }): ReactElement {
+/**
+ * Speaker picker: roster follows the active theme. Locked while the loop is
+ * working (thinking/speaking): the TTS session is created at submit time with
+ * the voice baked in, so a mid-round switch could only apply NEXT round —
+ * the lock keeps the control honest with that (switchable = takes effect).
+ */
+function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase'] }): ReactElement {
   const theme = settings().ttsTheme
   const current = settings().speakerByTheme[theme]
     ?? voiceThemeOf(theme)?.defaultSpeaker
     ?? settings().voiceName
   const lang = settings().voiceLang
   const options = speakersForTheme(theme, lang)
+  const locked = phase === 'thinking' || phase === 'speaking'
   const labelOf = (id: string): string => {
     const hit = options.find(o => o.id === id)
     return hit !== undefined && !('more' in hit) ? hit.label : (id === '' ? '系统默认' : id)
@@ -514,10 +536,11 @@ function SpeakerPicker({ settings, setVoiceOverride }: { settings: () => { voice
     setVoiceOverride(id)
   }
   return (
-    <label className='dsh-voice-ctl' title='说话人'>
+    <label className='dsh-voice-ctl' title={locked ? '本轮回复播完后可切换' : '说话人'}>
       <select
         className='dsh-voice-ctl-select'
         value={current}
+        disabled={locked}
         onChange={event => { pick(event.target.value) }}
         aria-label='说话人'
       >
