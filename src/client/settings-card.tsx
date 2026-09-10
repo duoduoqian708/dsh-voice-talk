@@ -291,7 +291,6 @@ function AsrRow({
           <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{engine.label}</span>
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
         </div>
-        {active && <p className='dsh-voice-engine-note'>说话限时 60 秒，停顿自动发送</p>}
       </div>
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
