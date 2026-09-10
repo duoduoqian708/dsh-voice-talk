@@ -240,7 +240,7 @@ async function synthXfyun(
           sfl: 1,
           // Empty vcn makes the vendor reject the synthesis; the theme's
           // default speaker steps in when the caller never picked one.
-          vcn: voice === '' ? 'x4_xiaoyan' : voice,
+          vcn: voice === '' ? 'x4_yezi' : voice,
           // speed: 0..100 where 50 is normal; map rate 1x → 50, 2x → 100.
           speed: Math.round(Math.min(100, Math.max(0, rate * 50))),
           tte: 'utf8',
