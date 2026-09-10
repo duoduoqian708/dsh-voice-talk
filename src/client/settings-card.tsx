@@ -681,7 +681,7 @@ function ProviderModal({
               value={speakerDraft}
               onChange={event => setSpeakerDraft(event.target.value)}
             >
-              {renderSpeakerOptions(speakers, value.speakerByTheme[theme.id] ?? theme.defaultSpeaker)}
+              {renderSpeakerOptions(speakers, savedSpeaker)}
             </select>
             <button
               type='button'

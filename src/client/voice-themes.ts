@@ -164,7 +164,7 @@ export const QWEN_SPEAKERS: readonly SpeakerOption[] = [
 
 /** iFlytek streaming-TTS speaker ids (control-console 试用 list). */
 export const XFYUN_SPEAKERS: readonly SpeakerOption[] = [
-  { id: 'x4_yezi', label: '小露 · 女声（默认）' },
+  { id: 'x4_yezi', label: '小露 · 女声' },
   { id: 'x4_xiaoyan', label: '小燕 · 女声' },
   { id: 'aisjiuxu', label: '许久 · 男声' },
   { id: 'aisjinger', label: '小婧 · 女声' },

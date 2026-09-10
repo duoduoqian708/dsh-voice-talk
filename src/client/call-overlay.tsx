@@ -577,6 +577,9 @@ function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => 
   const lang = settings().voiceLang
   const options = speakersForTheme(theme, lang)
   const locked = phase === 'thinking' || phase === 'speaking'
+  // （默认）marks the BUILT-IN default — the current selection is already
+  // shown by the select's own checkmark; mixing the two produced two 默认s.
+  const defaultId = voiceThemeOf(theme)?.defaultSpeaker ?? ''
   const labelOf = (id: string): string => {
     const hit = options.find(o => o.id === id)
     return hit !== undefined && !('more' in hit) ? hit.label : (id === '' ? '系统默认' : id)
@@ -602,13 +605,13 @@ function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => 
           ? [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))].map(group => (
             <optgroup key={group} label={group}>
               {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => (
-                <option key={option.id} value={option.id}>{option.label}{option.id === current ? '（默认）' : ''}</option>
+                <option key={option.id} value={option.id}>{option.label}{option.id === defaultId ? '（默认）' : ''}</option>
               ))}
             </optgroup>
           ))
           : options.map(option => (
             <option key={option.id || '__default'} value={option.id}>
-              {option.label}{option.id === current ? '（默认）' : ''}
+              {option.label}{option.id === defaultId ? '（默认）' : ''}
             </option>
           ))}
       </select>
