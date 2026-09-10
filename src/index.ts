@@ -14,7 +14,7 @@ import z from 'schemastery'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { makeVoiceTtsRoutes } from './tts-bridge.ts'
 import { registerQwenUpgrade, QWEN_DEFAULT_ENDPOINT, QWEN_DEFAULT_MODEL } from './tts-qwen.ts'
-import { registerQwenAsrUpgrade } from './asr-bridge.ts'
+import { registerAsrUpgrade } from './asr-bridge.ts'
 
 /** Settings namespace both halves read. */
 export const VOICE_SETTINGS_NAMESPACE = settingsNamespace('voice')
@@ -84,7 +84,8 @@ export function apply(ctx: Context, config?: Config): void {
   // the bridge routes are guaranteed a live registration site.
   for (const route of makeVoiceTtsRoutes(ctx)) ctx.webServer.register(route)
   ctx.webServer.registerUpgrade(registerQwenUpgrade(ctx))
-  ctx.webServer.registerUpgrade(registerQwenAsrUpgrade(ctx))
+  ctx.webServer.registerUpgrade(registerAsrUpgrade(ctx, 'qwen'))
+  ctx.webServer.registerUpgrade(registerAsrUpgrade(ctx, 'xfyun'))
 }
 
 /** The bridge routes mount with the web server; credentials resolve per request. */

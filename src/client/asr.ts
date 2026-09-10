@@ -157,6 +157,9 @@ export class CloudRecognizer implements Recognizer {
       }
       if (event.type === 'ready') {
         ready = true
+        // Every successful session resets the backoff — iFlytek's per-utterance
+        // rotation must not let the reconnect delay creep toward its max.
+        restartAttempt = 0
         for (const chunk of pending.splice(0)) sendChunk(chunk)
         return
       }
