@@ -526,6 +526,10 @@ function ProviderModal({
   /** Stored credentials as head****tail, served by the host status route —
    *  so the preview survives reloads (the browser never gets full values). */
   const [storedPreview, setStoredPreview] = useState<Record<string, string>>({})
+  /** Which credential rows are in edit mode: editing rows show the typed
+   *  draft (password dots); idle rows SHOW the stored mask in the field
+   *  itself — the standard credential display (GitHub/OpenAI style). */
+  const [editing, setEditing] = useState<Record<string, boolean>>({})
   const [fieldDraft, setFieldDraft] = useState<Record<string, string>>(
     Object.fromEntries(fields.map(f => [f.field, String(value[f.field as keyof Required<VoiceSettings>] ?? '')])),
   )
@@ -552,6 +556,10 @@ function ProviderModal({
   }, [credentials, refs])
 
   /** Auto-save one credential on blur; on success show its value (plain or masked). */
+  /** What the idle field shows: this session's just-saved mask, else the
+   *  stored credential's head****tail (full value for the plain APPID). */
+  const displayOf = (ref: string): string => savedPreview[ref] ?? storedPreview[ref] ?? ''
+
   const saveCred = (ref: string, mask: boolean): void => {
     const text = draft[ref]?.trim() ?? ''
     if (text === '') return
@@ -628,20 +636,18 @@ function ProviderModal({
             <span className='dsh-voice-cred-cell'>
               <input
                 className='dsh-voice-input dsh-voice-input-wide'
-                type={mask ? 'password' : 'text'}
-                placeholder={credState[ref] === true
-                  ? (mask ? '••••••••' : '已保存')
-                  : (mask ? '粘贴密钥' : '输入 APPID')}
-                value={draft[ref] ?? ''}
+                type={editing[ref] === true && mask ? 'password' : 'text'}
+                placeholder={displayOf(ref) !== ''
+                  ? ''
+                  : credState[ref] === true
+                    ? (mask ? '••••••••' : '已保存')
+                    : (mask ? '粘贴密钥' : '输入 APPID')}
+                value={editing[ref] === true ? (draft[ref] ?? '') : displayOf(ref)}
+                onFocus={() => setEditing(e => ({ ...e, [ref]: true }))}
                 onChange={event => setDraft(d => ({ ...d, [ref]: event.target.value }))}
-                onBlur={() => saveCred(ref, mask)}
+                onBlur={() => { saveCred(ref, mask); setEditing(e => ({ ...e, [ref]: false })) }}
                 onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
               />
-              {savedPreview[ref] !== undefined
-                ? <span className='dsh-voice-cred-badge'>{savedPreview[ref]}</span>
-                : storedPreview[ref] !== undefined && storedPreview[ref] !== ''
-                  ? <span className='dsh-voice-cred-badge'>{storedPreview[ref]}</span>
-                  : credState[ref] === true && <span className='dsh-voice-cred-badge'>{mask ? '已配置' : '已保存'}</span>}
             </span>
           </label>
         ))}

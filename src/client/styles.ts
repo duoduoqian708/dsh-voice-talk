@@ -172,11 +172,6 @@ const CSS = `
 .dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
 .dsh-voice-modal select.dsh-voice-input { max-width: none; flex: 1; }
 .dsh-voice-cred-cell { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dsh-voice-cred-badge {
-  flex: none; font-size: 11px; color: #34C759;
-  padding: 2px 8px; border-radius: 999px;
-  background: rgba(52, 199, 89, .12);
-}
 
 /* host dark theme: adapt card surfaces (the presenter sets the attribute) */
 body[data-ds-dark-theme] .dsh-voice-card,
