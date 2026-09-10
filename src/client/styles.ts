@@ -216,6 +216,8 @@ body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-webkit-sli
 body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-moz-range-thumb { background: #E6EDF7; border-color: rgba(0, 0, 0, .35); }
 body[data-ds-dark-theme] .dsh-voice-rate-ticks i { background: rgba(255, 255, 255, .25); }
 body[data-ds-dark-theme] .dsh-voice-rate-ticks i.is-active { background: #6AB8FF; }
+body[data-ds-dark-theme] .dsh-voice-jump { background: #232A3B; border-color: rgba(255, 255, 255, .12); }
+body[data-ds-dark-theme] .dsh-voice-jump i { border-color: rgba(230, 237, 247, .7); }
 body[data-ds-dark-theme] .dsh-voice-marked { background: rgba(106, 184, 255, .16); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head { color: rgba(230, 237, 247, .55); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head:hover { color: #E6EDF7; }
@@ -532,9 +534,25 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   pointer-events: none;
 }
 .dsh-voice-stream {
-  flex: 1; overflow-y: auto; padding: 24px 28px 28px;
+  flex: 1; overflow-y: auto; padding: 32px 28px 36px;
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
+}
+/* jump-to-latest: floats bottom-right while the user is reading history */
+.dsh-voice-jump {
+  position: absolute; right: 20px; bottom: 20px; z-index: 6;
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid rgba(0, 0, 0, .1);
+  background: #fff; cursor: pointer; padding: 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .16);
+  transition: transform .15s;
+}
+.dsh-voice-jump:hover { transform: scale(1.08); }
+.dsh-voice-jump i {
+  width: 8px; height: 8px; margin-top: -2px;
+  border-right: 2px solid #6E6E73; border-bottom: 2px solid #6E6E73;
+  transform: rotate(45deg);
 }
 .dsh-voice-msg { display: flex; gap: 8px; align-items: flex-end; animation: dsh-msg-in .25s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)) backwards; }
 @keyframes dsh-msg-in {
@@ -735,7 +753,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
   .dsh-voice-duration { margin-top: 2px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
-  .dsh-voice-stream { padding: 16px 14px 20px; }
+  .dsh-voice-stream { padding: 20px 14px 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

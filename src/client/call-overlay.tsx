@@ -12,7 +12,7 @@
 // All motion is transform/opacity.
 
 import { createPortal } from 'react-dom'
-import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
 import type { TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
@@ -60,6 +60,13 @@ const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
 const UTTERANCE_CAP_MS = 60_000
 /** Countdown becomes visible in the final stretch of the cap window. */
 const COUNTDOWN_VISIBLE_MS = 10_000
+/** Render window of the stream: only the newest slice of the transcript is
+ *  mounted; older messages prepend on scroll-to-top and the window trims
+ *  back to the tail while pinned to the bottom. Keeps the DOM bounded no
+ *  matter how long the session grows. */
+const STREAM_PAGE = 20
+const STREAM_TRIM_AT = 80
+const STREAM_KEEP = 40
 
 /**
  * The 60s utterance-cap ring: a stroke circle around the mic key that erodes
@@ -398,18 +405,77 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
     return () => clearInterval(id)
   }, [mode])
 
-  // Stream auto-scroll: follow the tail unless the user scrolled up.
+  // Stream follow + render window. Entry pins to the newest message; follow
+  // is direction-based (only a real upward scroll leaves the tail, so content
+  // growth and programmatic snaps never break it); the render window keeps at
+  // most a slice of the transcript mounted.
   const streamRef = useRef<HTMLDivElement | null>(null)
   const followRef = useRef(true)
-  useEffect(() => {
+  const [following, setFollowing] = useState(true)
+  const [windowStart, setWindowStart] = useState<number | null>(null)
+  const lastTopRef = useRef(0)
+  const anchorRef = useRef<{ top: number; height: number } | null>(null)
+  const start = Math.min(
+    windowStart ?? Math.max(0, messages.length - STREAM_PAGE),
+    Math.max(0, messages.length - 1),
+  )
+  const visible = messages.slice(start)
+
+  // Entry (every armed loop): follow on, window back to the tail, pinned.
+  useLayoutEffect(() => {
+    if (mode !== 'loop') return
+    followRef.current = true
+    setFollowing(true)
+    lastTopRef.current = 0
+    anchorRef.current = null
+    setWindowStart(null)
+    const el = streamRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [mode])
+
+  // Follow the tail while pinned; trim the window once the mounted list
+  // outgrows the cap (invisible while the viewport sits at the bottom).
+  useLayoutEffect(() => {
     const el = streamRef.current
     if (el === null || !followRef.current) return
     el.scrollTop = el.scrollHeight
+    if (messages.length - start > STREAM_TRIM_AT) {
+      anchorRef.current = null
+      setWindowStart(messages.length - STREAM_KEEP)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, streaming])
+
+  // Prepend anchoring: after older messages land, hold the viewport still.
+  useLayoutEffect(() => {
+    const el = streamRef.current
+    const anchor = anchorRef.current
+    if (el === null || anchor === null) return
+    anchorRef.current = null
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height)
+  }, [start])
+
   const onStreamScroll = (): void => {
     const el = streamRef.current
     if (el === null) return
-    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    const top = el.scrollTop
+    const gap = el.scrollHeight - top - el.clientHeight
+    if (top < lastTopRef.current - 2) followRef.current = false
+    if (gap < 48) followRef.current = true
+    lastTopRef.current = top
+    setFollowing(followRef.current)
+    if (top < 60 && start > 0) {
+      anchorRef.current = { top, height: el.scrollHeight }
+      setWindowStart(Math.max(0, start - STREAM_PAGE))
+    }
+  }
+
+  const jumpToLatest = (): void => {
+    const el = streamRef.current
+    if (el === null) return
+    followRef.current = true
+    setFollowing(true)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
   if (mode !== 'loop') return null
@@ -486,7 +552,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
 
       <section className='dsh-voice-right' aria-label='会话内容'>
         <div className='dsh-voice-stream' ref={streamRef} onScroll={onStreamScroll}>
-          {messages.map(m => (
+          {visible.map(m => (
             <StreamMessage
               key={m.seq}
               role={m.role}
@@ -537,6 +603,17 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
             </div>
           )}
         </div>
+        {!following && (
+          <button
+            type='button'
+            className='dsh-voice-jump'
+            onClick={jumpToLatest}
+            title='回到最新'
+            aria-label='回到最新消息'
+          >
+            <i />
+          </button>
+        )}
       </section>
     </div>,
     document.body,
