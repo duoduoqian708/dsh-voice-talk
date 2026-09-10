@@ -63,6 +63,8 @@ const COUNTDOWN_VISIBLE_MS = 10_000
 /**
  * The 60s utterance-cap ring: a stroke circle around the mic key that erodes
  * clockwise from 12 o'clock while the utterance runs; gone = force submit.
+ * (Negative dashoffset sweeps the erasing edge clockwise; a positive one
+ * would run it counterclockwise — the path itself starts at 12 via rotate.)
  */
 function MicRing({ startAt }: { startAt: number | null }): ReactElement | null {
   const ringRef = useRef<SVGCircleElement | null>(null)
@@ -73,7 +75,7 @@ function MicRing({ startAt }: { startAt: number | null }): ReactElement | null {
     const frame = (): void => {
       raf = requestAnimationFrame(frame)
       const progress = Math.min(1, Math.max(0, (Date.now() - startAt) / UTTERANCE_CAP_MS))
-      if (ringRef.current !== null) ringRef.current.style.strokeDashoffset = String(progress * circumference)
+      if (ringRef.current !== null) ringRef.current.style.strokeDashoffset = String(-progress * circumference)
     }
     raf = requestAnimationFrame(frame)
     return () => cancelAnimationFrame(raf)
