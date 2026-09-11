@@ -291,7 +291,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
    own auto margin, so the cluster centers while duration stays on top */
 .dsh-voice-hero {
   display: flex; align-items: center; justify-content: center;
-  gap: 22px; width: 100%; margin-top: 10px; flex: none;
+  gap: 22px; width: 100%; margin-top: 22px; flex: none;
 }
 .dsh-voice-avatar-wrap {
   position: relative; width: 102px; height: 102px;
@@ -378,7 +378,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 }
 
 .dsh-voice-state-word {
-  position: relative; margin-top: 26px;
+  position: relative; margin-top: 40px;
   display: inline-flex; align-items: center;
   font-size: 15px; font-weight: 500;
   color: #6E6E73;
