@@ -17,8 +17,7 @@ import type { ConversationSnapshot, PartialAssistant } from '@deepseek-ai/dsh-cl
 import type { TtsProvider, TtsSession } from './speech.ts'
 import { sessionFromSpeak } from './speech.ts'
 import { CloudRecognizer } from './asr.ts'
-import { cleanForSpeech, cleanStreamProse } from './readout.ts'
-export { cleanStreamProse } from './readout.ts'
+import { cleanStreamProse } from './readout.ts'
 import { isStopCommand, looksLikeEcho, normalizeForEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
@@ -82,7 +81,7 @@ function hasRecognizedText(interim: string): boolean {
 
 /**
  * Stream-safe cleaner lives in readout.ts now (shared with the karaoke
- * marker); re-exported above for callers that imported it from here.
+ * marker).
  */
 
 /** Index just past the last sentence boundary, or null when none. */
