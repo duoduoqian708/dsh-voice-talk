@@ -61,7 +61,7 @@ registerVoiceTheme({
   create: t => new QwenRealtimeTtsProvider(t),
   needsSetup: true,
   noteKey: 'theme.qwenNote',
-  setupUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
+  setupUrl: 'https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS',
   defaultSpeaker: 'Cherry',
 })
 
