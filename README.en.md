@@ -68,7 +68,7 @@ Key entry: Settings → Plugins → Voice chat → "Settings" on the engine row.
 
 ## Settings
 
-Changes on the settings page are persistent defaults; changes made in the call overlay are **per-session** — they survive hang-up and reset on a new session. Voice and rate can also be adjusted temporarily during a call.
+Changes on the settings page are persistent defaults; changes made in the call overlay are **temporary** — every new call starts from the defaults. Voice and rate can also be adjusted during a call.
 
 | Setting | Description | Default |
 |---|---|---|
