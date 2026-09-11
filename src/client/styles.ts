@@ -279,9 +279,9 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 
 /* current-call duration (resets on every armed loop), centered above the hero */
 .dsh-voice-duration {
-  margin-top: 8px; text-align: center;
+  margin-top: 18px; text-align: center;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 15px; font-weight: 500;
+  font-size: 18px; font-weight: 500;
   color: #6E6E73;
   font-variant-numeric: tabular-nums;
 }
@@ -378,7 +378,8 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 }
 
 .dsh-voice-state-word {
-  margin-top: 14px;
+  position: relative; margin-top: 14px;
+  display: inline-flex; align-items: center;
   font-size: 15px; font-weight: 500;
   color: #6E6E73;
 }
@@ -395,7 +396,6 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
 }
 .dsh-voice-live-interim { color: #1D1D1F; }
-.dsh-voice-live-hint { color: #86868B; font-size: 13px; }
 .dsh-voice-live-warn { color: #B25000; font-size: 13px; }
 .dsh-voice-live-error { color: #FF3B30; font-size: 13px; }
 
@@ -543,15 +543,14 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-hangup-ctl:hover { filter: brightness(1.06); }
 .dsh-voice-hangup-ctl:active { transform: scale(.96); filter: brightness(.96); }
 
-/* skip row (visible while speaking; reserved space, no layout jump) */
-.dsh-voice-hangup-row {
-  margin-top: 12px; min-height: 22px;
-  display: flex; align-items: center; justify-content: center;
-}
+/* skip readout: rides the state word's right edge (absolute, so the word
+   stays perfectly centered either way; hidden while not speaking) */
 .dsh-voice-skip {
+  position: absolute; left: calc(100% + 12px); top: 50%;
+  transform: translateY(-50%); white-space: nowrap;
   border: none; background: none; cursor: pointer;
   color: #007AFF; font-size: 14px;
-  padding: 0 4px;
+  padding: 0;
 }
 .dsh-voice-skip[data-visible="false"] { visibility: hidden; }
 
@@ -799,7 +798,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   .dsh-voice-rate-magnet { width: 140px; }
   .dsh-voice-hangup-ctl { width: 52px; height: 52px; }
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
-  .dsh-voice-duration { margin-top: 2px; }
+  .dsh-voice-duration { margin-top: 12px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
   .dsh-voice-stream { padding: 20px 14px 24px; }
 }

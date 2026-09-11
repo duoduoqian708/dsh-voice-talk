@@ -515,7 +515,15 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} utteranceStartAt={utteranceStartAt} />
 
         <div className='dsh-voice-state-word' style={mutedIdle ? { visibility: 'hidden' } : undefined} aria-hidden={mutedIdle || undefined}>
-          {PHASE_WORD[phase]}
+          <span>{PHASE_WORD[phase]}</span>
+          <button
+            type='button'
+            className='dsh-voice-skip'
+            data-visible={phase === 'speaking'}
+            onClick={stopSpeaking}
+          >
+            跳过播报
+          </button>
         </div>
 
         <div className='dsh-voice-live' aria-live='polite'>
@@ -523,9 +531,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
           {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 请语音回答</div>}
           {phase === 'listening' && !micMuted && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
-          {phase !== 'listening' && (error === null && !setupMissing && pendingCount === 0) && (
-            <div className='dsh-voice-live-hint'>{phase === 'thinking' ? '正在组织回复…' : phase === 'speaking' ? '正在播报' : '说话即发送'}</div>
-          )}
         </div>
 
         <div className='dsh-voice-controls'>
@@ -541,17 +546,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
             aria-label='结束语音对话'
           >
             <PhoneGlyph />
-          </button>
-        </div>
-
-        <div className='dsh-voice-hangup-row'>
-          <button
-            type='button'
-            className='dsh-voice-skip'
-            data-visible={phase === 'speaking'}
-            onClick={stopSpeaking}
-          >
-            跳过播报
           </button>
         </div>
 
