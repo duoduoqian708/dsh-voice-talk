@@ -42,9 +42,9 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 After installing, configure it under **Settings → Plugins → Voice chat**.
 
-Qwen is recommended: usage-based billing with no subscription plan needed, so the cost for personal use stays under control (≈¥0.33 per 1k characters; pricing varies by model), and in our testing its Chinese speech sounds the most natural.
+Qwen is recommended: usage-based billing with no subscription plan needed, so the cost for personal use stays under control (≈¥0.00033 per second; pricing varies by model), and in our testing its Chinese speech sounds the most natural.
 
-1. Get a DashScope API Key from Alibaba Cloud Model Studio: https://bailian.console.aliyun.com/?apiKey=1
+1. Get a DashScope API Key from Alibaba Cloud Model Studio: https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS
 2. Paste the key into Qwen's "Settings" back on the settings page — the model and endpoint are already built in, so one key is all you need; to make "Speak" use Qwen as well, click "Enable" on that row too.
 3. Top up your account a little and you are set. "Listen" requires a cloud engine; with the key in place, both directions work.
 
@@ -61,7 +61,7 @@ There is a mic icon next to the input box on the conversation page or workspace;
 | Direction | Engine | Cost | Credentials |
 |---|---|---|---|
 | Speak | System voice | Free · offline | None |
-| Speak · Listen | **Qwen (recommended)** | ≈¥0.33 per 1k chars | DashScope API Key |
+| Speak · Listen | **Qwen (recommended)** | ≈¥0.00033 per second | DashScope API Key |
 | Speak · Listen | iFlytek | Daily free quota | APPID + API Key + API Secret |
 
 Key entry: Settings → Plugins → Voice chat → "Settings" on the engine row. Once filled in, click "Preview / Test mic" to verify.

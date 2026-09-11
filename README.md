@@ -42,9 +42,9 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 安装后，在 **设置 → 插件 → 语音对话** 里配置。
 
-推荐用千问：按量计费、没有套餐门槛，个人使用成本可控（约 0.33 元 / 千字符，不同模型价格不同），实测中文语音的自然度也最好。
+推荐用千问：按量计费、没有套餐门槛，个人使用成本可控（约 0.00033 元 / 秒，不同模型价格不同），实测中文语音的自然度也最好。
 
-1. 到阿里云百炼申请一个 DashScope API Key：https://bailian.console.aliyun.com/?apiKey=1
+1. 到阿里云百炼申请一个 DashScope API Key：https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS
 2. 回设置页把 Key 填进千问的「设置」里——模型和地址都已内置，填一个 Key 就能用；想让「说」也用千问，顺手点一下它的「启用」。
 3. 给账户充一点钱即可。「听」必须用云端引擎，Key 填好后听说就都通了。
 
@@ -61,7 +61,7 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 | 用途 | 引擎 | 费用 | 凭证 |
 |---|---|---|---|
 | 说 | 系统语音 | 免费 · 离线 | 无需 |
-| 说 · 听 | **千问（主推）** | 约 0.33 元 / 千字符 | DashScope API Key |
+| 说 · 听 | **千问（主推）** | 约 0.00033 元 / 秒 | DashScope API Key |
 | 说 · 听 | 讯飞 | 每日免费额度 | APPID + API Key + API Secret |
 
 密钥入口：设置 → 插件 → 语音对话 → 对应引擎「设置」。填好后可点「试听 / 试音」验证。
