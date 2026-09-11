@@ -10,6 +10,7 @@
 //   → binary frames                        raw 16k/16-bit/mono PCM chunks
 //   → bye
 //   ← ready
+//   ← activity                             vendor VAD heard speech onset
 //   ← interim{text} / final{text} / error{error}
 //
 // Upstream protocol (DashScope realtime, same event family as tts-qwen.ts):
@@ -70,9 +71,17 @@ function sessionConfig(lang: string): Record<string, unknown> {
       input_audio_format: 'pcm',
       input_sample_rate: 16_000,
     },
-    // Server VAD stays at its documented default (800ms): the loop's own
-    // silence timer owns utterance submission; the vendor's turn detection
-    // just splits the stream into sentences.
+    // The vendor VAD only splits the stream into sentences (the loop's own
+    // silence timer owns submission), but its defaults are too dull for
+    // close-mic speech: threshold 0.2 reads quiet stretches as silence and
+    // cuts a sentence there, stalling the next item's partials while the
+    // user is still talking. Force the documented recommendation (0.0); the
+    // 800ms end-point stays, since the loop's flush window assumes it.
+    turn_detection: {
+      type: 'server_vad',
+      threshold: 0.0,
+      silence_duration_ms: 800,
+    },
   }
 }
 
@@ -84,6 +93,9 @@ interface AsrUpstream {
 interface AsrUpstreamHandlers {
   onPartial(text: string): void
   onFinal(text: string): void
+  /** The vendor's VAD heard speech onset (no text yet): a liveness signal the
+   *  loop must not mistake for the user pausing. */
+  onActivity(): void
   onError(message: string): void
   /** Upstream ended without a final (network drop, vendor cap) — the bridge
    *  closes the browser link quietly so it reconnects with a fresh session. */
@@ -95,6 +107,7 @@ type AsrWireEvent = {
   text?: string
   stash?: string
   transcript?: string
+  item_id?: string
   error?: { code?: string; message?: string }
 }
 
@@ -157,12 +170,25 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
       } catch {
         return
       }
+      if (event.type === 'input_audio_buffer.speech_started') {
+        // TEMP TRACE (remove after the flush-window verification).
+        console.info('[voice-asr][trace]', 'speech_started', Date.now())
+        handlers.onActivity()
+        return
+      }
+      if (event.type === 'input_audio_buffer.speech_stopped') {
+        // TEMP TRACE (remove after the flush-window verification).
+        console.info('[voice-asr][trace]', 'speech_stopped', Date.now(), event.item_id ?? '')
+        return
+      }
       if (event.type === 'conversation.item.input_audio_transcription.text') {
         // Partial: `text` is the settled prefix, `stash` the live tail.
         handlers.onPartial(`${event.text ?? ''}${event.stash ?? ''}`)
         return
       }
       if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        // TEMP TRACE (remove after the flush-window verification).
+        console.info('[voice-asr][trace]', 'completed', Date.now())
         handlers.onFinal(event.transcript ?? '')
         return
       }
@@ -174,6 +200,8 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
       }
     })
     socket.on('close', () => {
+      // TEMP TRACE (remove after the flush-window verification).
+      console.info('[voice-asr][trace]', 'upstream_close', Date.now())
       // A quiet upstream drop is NOT fatal: the browser reconnects and the
       // hello opens a fresh session (only vendor `error` frames are fatal).
       if (live && !ended) {
@@ -381,6 +409,7 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
       sendJson({ type: 'final', text })
       if (vendor === 'xfyun') tearDown()
     },
+    onActivity: (): void => { sendJson({ type: 'activity' }) },
     onError: (message: string): void => {
       sendJson({ type: 'error', error: message })
       tearDown()

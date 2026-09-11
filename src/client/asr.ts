@@ -138,7 +138,12 @@ export class CloudRecognizer implements Recognizer {
         // Every successful session resets the backoff — iFlytek's per-utterance
         // rotation must not let the reconnect delay creep toward its max.
         restartAttempt = 0
+        events.onLink?.(true)
         for (const chunk of pending.splice(0)) sendChunk(chunk)
+        return
+      }
+      if (event.type === 'activity') {
+        events.onSpeech?.()
         return
       }
       if (event.type === 'interim' && typeof event.text === 'string') {
@@ -172,6 +177,9 @@ export class CloudRecognizer implements Recognizer {
         ready = false
         if (disposed || restarting) return
         // Unexpected drop (network blip): re-arm with backoff, mic stays.
+        // Nothing can arrive while the link is down, so surface it: the loop
+        // must not read the event gap as the user pausing.
+        events.onLink?.(false)
         restarting = true
         const delay = Math.min(RECONNECT_BASE_MS * 2 ** restartAttempt, RECONNECT_MAX_MS)
         restartAttempt += 1

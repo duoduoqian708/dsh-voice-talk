@@ -351,6 +351,12 @@ export class VoiceController {
   #replyTimer: ReturnType<typeof setTimeout> | null = null
   #echoMuteTimer: ReturnType<typeof setTimeout> | null = null
   #pendingFinal: string | null = null
+  /** The current (unfinalized) partial of the item being transcribed: what
+   *  the user sees streaming. Flushes join it with #pendingFinal, so a pause
+   *  or the 60s cap never drops the half-sentence on screen. */
+  #liveInterim = ''
+  /** TEMP TRACE: arrival epoch of the last ASR liveness event. */
+  #lastAsrAt = 0
   /** Voice follow-up for a blocking approval/question (see #checkPending). */
   #pendingVoice: PendingVoiceState | null = null
   /** Waits already responded to; skipped until the snapshot drops them. */
@@ -539,6 +545,8 @@ export class VoiceController {
     const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
       onInterim: interim => {
+        this.#lastAsrAt = Date.now()
+        this.#liveInterim = interim
         this.status.patch({ interim: this.#composeInterim(interim) })
         if (hasRecognizedText(interim)) {
           // The 60s cap opens on the FIRST recognized text, never on raw mic
@@ -551,6 +559,13 @@ export class VoiceController {
           if (this.#pendingFinal !== null) this.#resetSilenceTimer()
         }
       },
+      onSpeech: () => {
+        this.#lastAsrAt = Date.now()
+        // The vendor VAD heard live speech: whatever text gap follows is
+        // capture latency, not the user pausing — keep the countdown alive.
+        if (this.#silenceTimer !== null) this.#resetSilenceTimer()
+      },
+      onLink: up => this.#onLink(up),
       onFinal: text => this.#onFinalUtterance(text),
       onEnd: () => { /* the recognizer reconnects itself */ },
       onError: (message, fatal) => {
@@ -591,7 +606,7 @@ export class VoiceController {
     this.#utteranceTimer = setTimeout(() => {
       this.#utteranceTimer = null
       // Cap reached: force the turn out even if the user keeps talking.
-      this.#flushPending()
+      this.#flushPending('cap')
     }, UTTERANCE_CAP_MS)
   }
 
@@ -607,6 +622,7 @@ export class VoiceController {
 
   #armListening(): void {
     if (this.#disposed) return
+    this.#liveInterim = ''
     this.status.patch({ phase: 'listening', interim: '', caption: '' })
     this.#startRecognition()
   }
@@ -630,6 +646,10 @@ export class VoiceController {
     // (abort races, timeout degrade) — it must never reach the composer.
     if (this.status.getSnapshot().mode !== 'loop') return
     if (this.status.getSnapshot().micMuted) return
+    this.#lastAsrAt = Date.now()
+    // A final ends its item: the item's live partial is now superseded by
+    // the accumulated #pendingFinal (display continuity is patched below).
+    this.#liveInterim = ''
     if (this.#speaking) {
       // Stop commands first: they bypass the echo guard and the arm delay
       // (the guard unconditionally eats short commands), and they only
@@ -729,21 +749,52 @@ export class VoiceController {
       || (phase === 'speaking' && resolveSettings(this.#deps.settings()).allowInterrupt)
   }
 
+  /**
+   * Recognition transport state. While the link is down no events can flow,
+   * so an event gap there says nothing about the user: park the flush
+   * countdown and give the kept text a fresh window once the link is back.
+   */
+  #onLink(up: boolean): void {
+    if (!up) {
+      if (this.#silenceTimer !== null) {
+        clearTimeout(this.#silenceTimer)
+        this.#silenceTimer = null
+      }
+      return
+    }
+    if (this.#pendingFinal !== null && this.#rearmListeningAfterMute()) this.#resetSilenceTimer()
+  }
+
   #resetSilenceTimer(): void {
     if (this.#silenceTimer !== null) clearTimeout(this.#silenceTimer)
     const seconds = resolveSettings(this.#deps.settings()).silenceTimeout
-    this.#silenceTimer = setTimeout(() => this.#flushPending(), seconds * 1000)
+    this.#silenceTimer = setTimeout(() => this.#flushPending('silence'), seconds * 1000)
   }
 
-  #flushPending(): void {
+  #flushPending(reason: 'silence' | 'cap'): void {
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
     }
     // The utterance window closes whatever flushed it (silence, the 60s cap).
     this.#clearUtterance()
-    const text = this.#pendingFinal
+    // Submit what the user saw: finalized segments PLUS the sentence still in
+    // flight, joined exactly like the display. Dropping the live tail ate the
+    // half-sentence a pause interrupted, and with no vendor final at all made
+    // the cap flush nothing.
+    const pending = this.#pendingFinal ?? ''
+    const live = this.#liveInterim
+    const text = pending === ''
+      ? (live === '' ? null : live)
+      : (live === '' ? pending : `${pending}，${live}`)
     this.#pendingFinal = null
+    this.#liveInterim = ''
+    // TEMP TRACE (remove after the flush-window verification).
+    console.info('[voice][trace] flush', reason, {
+      sinceLastAsrMs: this.#lastAsrAt === 0 ? -1 : Date.now() - this.#lastAsrAt,
+      pendingChars: pending.length,
+      liveChars: live.length,
+    })
     // The flush timer can outlive a hang-up by a beat; never submit then.
     if (this.status.getSnapshot().mode !== 'loop') return
     if (text === null || text.length < MIN_UTTERANCE_CHARS) return
@@ -978,6 +1029,7 @@ export class VoiceController {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#clearUtterance()
+    this.#liveInterim = ''
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
@@ -1188,6 +1240,7 @@ export class VoiceController {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#pendingFinal = null
+    this.#liveInterim = ''
     const spoken = this.#spokenText
     if (spoken !== null && spoken !== '') {
       this.#spokenTail = spoken
@@ -1251,6 +1304,7 @@ export class VoiceController {
     this.#spokenTail = null
     this.#spokenTailUntil = 0
     this.#pendingFinal = null
+    this.#liveInterim = ''
     this.#sawTurnActivity = false
     this.#spokenTurnId = null
   }

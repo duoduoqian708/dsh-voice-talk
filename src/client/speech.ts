@@ -10,6 +10,12 @@ export interface RecognitionEvents {
   onFinal(text: string): void
   /** The engine stopped on its own (silence, timeout, error). */
   onEnd(): void
+  /** The vendor's VAD heard speech onset: live audio is flowing even when no
+   *  interim text has landed yet — a gap here is not the user pausing. */
+  onSpeech?(): void
+  /** Transport state: false while the recognizer is reconnecting (no events
+   *  can flow), true once a fresh session is ready. */
+  onLink?(up: boolean): void
   /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported). */
   onError(message: string, fatal: boolean): void
 }
