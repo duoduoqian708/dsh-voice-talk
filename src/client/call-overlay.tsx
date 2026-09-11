@@ -22,6 +22,7 @@ import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
 import { RateMagnetSlider } from './rate-magnet.tsx'
 import { rawPrefixForCleaned } from './readout.ts'
 import { Markdown } from './markdown.tsx'
+import { VoicePicker } from './voice-picker.tsx'
 import avatarUrl from './assets/avatar.png'
 
 /** Selector-hook shape over the shared voice status. */
@@ -638,98 +639,25 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
  * working (thinking/speaking): the TTS session is created at submit time with
  * the voice baked in, so a mid-round switch could only apply NEXT round —
  * the lock keeps the control honest with that (switchable = takes effect).
+ * The dropdown itself is the shared VoicePicker (same component the settings
+ * provider modal uses).
  */
 function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase'] }): ReactElement {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  const currentRef = useRef<HTMLButtonElement | null>(null)
   const theme = settings().ttsTheme
   // A stored '' (the retired 主题默认 option) reads as the theme default.
   const storedSpeaker = settings().speakerByTheme[theme]
   const current = (storedSpeaker === undefined || storedSpeaker === '')
     ? (voiceThemeOf(theme)?.defaultSpeaker ?? settings().voiceName)
     : storedSpeaker
-  const options = speakersForTheme(theme, settings().voiceLang)
-  const locked = phase === 'thinking' || phase === 'speaking'
-  // （默认）marks the BUILT-IN default — the current selection is already
-  // shown by the row's checkmark; mixing the two produced two 默认s.
-  const defaultId = voiceThemeOf(theme)?.defaultSpeaker ?? ''
-  const labelOf = (id: string): string => {
-    const hit = options.find(o => o.id === id)
-    return hit !== undefined && !('more' in hit) ? hit.label : (id === '' ? '系统默认' : id)
-  }
-  const groups = [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))]
-  // Locked mid-round, or a click outside / Esc: the popup folds away.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (event: MouseEvent): void => {
-      if (rootRef.current !== null && !rootRef.current.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-  useEffect(() => {
-    if (locked) setOpen(false)
-  }, [locked])
-  // Open onto the current row, not the top of a 38-voice roster.
-  useEffect(() => {
-    if (open) currentRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [open])
-  const pick = (id: string): void => {
-    // Session-scope override: the HUD speaker choice holds for this session
-    // only (survives hang-ups) and never touches the stored defaults.
-    setVoiceOverride(id)
-    setOpen(false)
-  }
-  const item = (option: { id: string; label: string }): ReactElement => (
-    <button
-      key={option.id || '__default'}
-      ref={option.id === current ? currentRef : undefined}
-      type='button'
-      role='option'
-      aria-selected={option.id === current}
-      className='dsh-voice-speaker-item'
-      data-current={option.id === current || undefined}
-      onClick={() => pick(option.id)}
-    >
-      <span className='dsh-voice-speaker-check' aria-hidden='true'>{option.id === current ? '✓' : ''}</span>
-      <span className='dsh-voice-speaker-label'>{option.label}{option.id === defaultId ? '（默认）' : ''}</span>
-    </button>
-  )
   return (
-    <div className='dsh-voice-speaker' ref={rootRef}>
-      <button
-        type='button'
-        className='dsh-voice-speaker-btn'
-        data-locked={locked || undefined}
-        onClick={() => { if (!locked) setOpen(o => !o) }}
-        title={locked ? '本轮回复播完后可切换' : '说话人'}
-        aria-haspopup='listbox'
-        aria-expanded={open}
-        aria-label='说话人'
-      >
-        <span className='dsh-voice-ctl-value'>{labelOf(current)}</span>
-        <i className='dsh-voice-speaker-caret' aria-hidden='true' />
-      </button>
-      {open && (
-        <div className='dsh-voice-speaker-pop' role='listbox' aria-label='说话人'>
-          {groups.length === 0
-            ? options.map(option => item(option))
-            : groups.map(group => (
-              <div key={group} role='group' aria-label={group}>
-                <div className='dsh-voice-speaker-group'>{group}</div>
-                {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => item(option))}
-              </div>
-            ))}
-        </div>
-      )}
-    </div>
+    <VoicePicker
+      options={speakersForTheme(theme, settings().voiceLang)}
+      value={current}
+      defaultId={voiceThemeOf(theme)?.defaultSpeaker ?? ''}
+      locked={phase === 'thinking' || phase === 'speaking'}
+      lockHint='本轮回复播完后可切换'
+      ariaLabel='说话人'
+      onChange={setVoiceOverride}
+    />
   )
 }

@@ -172,7 +172,6 @@ const CSS = `
 .dsh-voice-modal-footer .dsh-voice-provider-btn { margin-left: auto; }
 .dsh-voice-input-wide { flex: 1; max-width: none; min-width: 0; }
 .dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
-.dsh-voice-modal select.dsh-voice-input { max-width: none; flex: 1; }
 .dsh-voice-cred-cell { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* host dark theme: adapt card surfaces (the presenter sets the attribute) */
@@ -536,6 +535,39 @@ body[data-ds-dark-theme] .dsh-voice-modal-divider::after { background: var(--dsw
 .dsh-voice-speaker-item[data-current='true'] { color: #007AFF; font-weight: 600; }
 .dsh-voice-speaker-check { width: 14px; flex: none; color: #007AFF; }
 .dsh-voice-speaker-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* voice picker (shared): the portal popup serves the settings modal — fixed
+   and re-anchored to the trigger by the component; the modal's scroll
+   container would clip an absolute popup and the veil (z-index 10000) would
+   cover it. */
+.dsh-voice-speaker-pop.is-portal { position: fixed; transform: none; z-index: 10050; }
+.dsh-voice-speaker-btn:focus-visible { outline: 2px solid rgba(0, 122, 255, .55); outline-offset: 2px; }
+/* settings modal: the picker takes the field slot the native select had */
+.dsh-voice-modal .dsh-voice-speaker { flex: 1; min-width: 0; }
+.dsh-voice-modal .dsh-voice-speaker-btn {
+  width: 100%; max-width: none; justify-content: space-between;
+  height: 34px; padding: 0 10px; border-radius: 10px; font-size: 13px;
+  background: #fff; border-color: rgba(15, 17, 21, .16); box-shadow: none; color: #0F1115;
+}
+body[data-ds-dark-theme] .dsh-voice-modal .dsh-voice-speaker-btn {
+  background: var(--dsw-alias-bg-layer-3, #353638);
+  border-color: var(--dsw-alias-border-l2, rgba(255, 255, 255, .12));
+  color: var(--dsw-alias-label-primary, #f5f6f7);
+}
+/* the portaled popup follows the host-neutral settings palette in dark; the
+   overlay's own popup keeps the stage navy. */
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal {
+  background: var(--dsw-alias-bg-layer-3, #353638);
+  border-color: var(--dsw-alias-border-l2, rgba(255, 255, 255, .12));
+}
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-group {
+  background: var(--dsw-alias-bg-layer-3, #353638);
+  color: var(--dsw-alias-label-tertiary, #adb2b8);
+}
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-item { color: var(--dsw-alias-label-primary, #f5f6f7); }
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, .08)); }
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-item[data-current='true'],
+body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-check { color: var(--dsw-alias-state-business-primary, #679efe); }
 
 /* rate: pill with the current stop + the five-notch magnet slider */
 .dsh-voice-ctl-value {

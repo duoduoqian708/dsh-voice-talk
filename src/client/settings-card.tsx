@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { VoiceSettings } from './voice-settings.ts'
 import { listVoiceThemes, speakersForTheme, voiceThemeOf, type VoiceTheme } from './voice-themes.ts'
+import { VoicePicker } from './voice-picker.tsx'
 import { CloudRecognizer, type AsrVendor } from './asr.ts'
 import type { RecognitionHandle } from './speech.ts'
 
@@ -686,13 +687,14 @@ function ProviderModal({
         <label className='dsh-voice-row'>
           <span className='dsh-voice-row-label'>音色</span>
           <span className='dsh-voice-cred-cell'>
-            <select
-              className='dsh-voice-input dsh-voice-input-wide'
+            <VoicePicker
+              options={speakers}
               value={speakerDraft}
-              onChange={event => setSpeakerDraft(event.target.value)}
-            >
-              {renderSpeakerOptions(speakers, savedSpeaker)}
-            </select>
+              defaultId={savedSpeaker}
+              ariaLabel='音色'
+              strategy='portal'
+              onChange={setSpeakerDraft}
+            />
             <button
               type='button'
               className='dsh-voice-provider-btn'
@@ -724,33 +726,6 @@ function ProviderModal({
       </div>
     </div>
   )
-}
-
-/** Render a (possibly grouped) speaker roster as select children. */
-function renderSpeakerOptions(speakers: ReturnType<typeof speakersForTheme>, defaultId?: string): ReactElement[] {
-  const groups = [...new Set(speakers.filter(o => 'group' in o).map(o => (o as { group: string }).group))]
-  if (groups.length === 0) {
-    return speakers.map(option => (
-      <option key={option.id || '__default'} value={option.id}>
-        {option.label}{option.id === defaultId ? '（默认）' : ''}
-      </option>
-    ))
-  }
-  const out: ReactElement[] = []
-  for (const group of groups) {
-    out.push(
-      <optgroup key={group} label={group}>
-        {speakers.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => (
-          <option key={option.id} value={option.id}>{option.label}{option.id === defaultId ? '（默认）' : ''}</option>
-        ))}
-      </optgroup>,
-    )
-  }
-  const tail = speakers.filter(o => !('group' in o))
-  for (const option of tail) {
-    out.push(<option key={option.id || '__default'} value={option.id}>{'more' in option ? option.label : option.label}</option>)
-  }
-  return out
 }
 
 /** Render the voice settings card. */
