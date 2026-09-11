@@ -122,9 +122,13 @@ export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onIn
     }
     const text = buffer
     buffer = ''
+    const base = played
     played += text.length
-    onProgress?.(played)
+    // A buffered engine has no intra-piece clock: claim nothing before the
+    // piece starts, and lock it complete when it ends (never ahead).
+    onProgress?.(base)
     chain = provider.speak(text, opts, onInterrupted).then(() => {
+      onProgress?.(played)
       chain = null
       pump()
     }, (error: unknown) => {
@@ -231,8 +235,8 @@ export class SystemTtsProvider implements TtsProvider {
         }
         return
       }
+      const base = played
       played += text.length
-      onProgress?.(played)
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.rate = opts.rate
       utterance.lang = opts.lang
@@ -240,7 +244,17 @@ export class SystemTtsProvider implements TtsProvider {
         const voice = synth.getVoices().find(v => v.name === opts.voiceName)
         if (voice !== undefined) utterance.voice = voice
       }
+      // Progress from the engine's own clock (the queue depth is not the
+      // playback position): onstart claims the piece it becomes current on,
+      // onboundary tracks within it, onend locks the piece complete.
+      utterance.onstart = () => {
+        onProgress?.(base)
+      }
+      utterance.onboundary = (event) => {
+        onProgress?.(base + (event.charIndex ?? 0))
+      }
       utterance.onend = () => {
+        onProgress?.(played)
         speaking = false
         if (settled) return
         speakNext()

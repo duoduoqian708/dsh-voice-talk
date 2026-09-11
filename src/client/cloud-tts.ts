@@ -7,6 +7,11 @@
 
 import type { TtsProvider, TtsSession, SpeakOptions } from './speech.ts'
 
+/** Karaoke-marker progress cadence (players only — a sentence lasts seconds). */
+const MARK_TICK_MS = 500
+/** Played audio subtracted before estimating, so the mark never leads the sound. */
+const MARK_LEAD_S = 0.25
+
 // ---- live readout level (call-face wave feed) -------------------------------
 // Both engines expose the level of the audio actually sounding right now:
 // qwen pre-computes per-chunk RMS into the playback schedule; the bridge path
@@ -215,13 +220,22 @@ export class BridgeAudioTtsProvider implements TtsProvider {
       resolveDone = resolve
       failDone = reject
     })
+    /** The chunk on the air; cancel() stops it mid-playback. */
+    let playing: { audio: HTMLAudioElement; url: string } | null = null
+    /** Playback-position estimator of the sounding chunk (see reportEstimate). */
+    let ticker: number | null = null
+    const stopTick = (): void => {
+      if (ticker !== null) {
+        window.clearInterval(ticker)
+        ticker = null
+      }
+    }
     const settleFail = (message: string): void => {
       if (settled) return
       settled = true
+      stopTick()
       failDone?.(new Error(message))
     }
-    /** The chunk on the air; cancel() stops it mid-playback. */
-    let playing: { audio: HTMLAudioElement; url: string } | null = null
     const pump = (): void => {
       if (settled || busy) return
       const text = queue.shift()
@@ -255,6 +269,29 @@ export class BridgeAudioTtsProvider implements TtsProvider {
           audio.src = url
           playing = { audio, url }
           bridgePlaying = true
+          // Progress = this chunk's measured playback position (never the queue
+          // position): the mark advances with the sound, not ahead of it.
+          const base = played
+          let lastReported = base
+          const finishPiece = (): void => {
+            stopTick()
+            URL.revokeObjectURL(url)
+            busy = false
+            playing = null
+            played = base + text.length
+            onProgress?.(played)
+            if (settled) return
+            pump()
+          }
+          const reportEstimate = (): void => {
+            const total = audio.duration
+            if (!Number.isFinite(total) || total <= 0) return
+            const fraction = Math.min(1, Math.max(0, audio.currentTime / total))
+            const estimate = base + Math.round(text.length * fraction)
+            if (estimate === lastReported) return
+            lastReported = estimate
+            onProgress?.(estimate)
+          }
           // Tap the element for the wave's playback level; the source must
           // reconnect to destination or the element would go silent.
           try {
@@ -267,33 +304,25 @@ export class BridgeAudioTtsProvider implements TtsProvider {
               audio.onended = () => {
                 bridgePlaying = false
                 try { source.disconnect() } catch { /* already down */ }
-                URL.revokeObjectURL(url)
-                busy = false
-                playing = null
-                if (settled) return
-                pump()
+                finishPiece()
               }
             }
           } catch { /* untapped: the element keeps its default output */ }
           audio.onerror = () => {
             bridgePlaying = false
+            stopTick()
             URL.revokeObjectURL(url)
             busy = false
             playing = null
             if (!settled) settleFail('音频播放失败')
           }
           if (audio.onended === null) {
-            audio.onended = () => {
-              URL.revokeObjectURL(url)
-              busy = false
-              playing = null
-              if (settled) return
-              pump()
-            }
+            audio.onended = () => { finishPiece() }
           }
-          played += text.length
-          onProgress?.(played)
+          stopTick()
+          ticker = window.setInterval(reportEstimate, MARK_TICK_MS)
           void audio.play().catch(error => {
+            stopTick()
             busy = false
             playing = null
             if (!settled) settleFail(`音频播放失败：${error instanceof Error ? error.message : String(error)}`)
@@ -318,6 +347,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
         ended = true
         if (!settled) {
           settled = true
+          stopTick()
           if (playing !== null) {
             playing.audio.pause()
             playing.audio.src = ''
@@ -361,6 +391,8 @@ class PcmStreamPlayer {
   readonly #context: AudioContext
   readonly #gain: GainNode
   #nextTime = 0
+  /** Context time of the first scheduled chunk (progress origin); null = none. */
+  #firstStart: number | null = null
   #sources = new Set<AudioBufferSourceNode>()
   #cancelled = false
   /** Playback schedule with per-chunk RMS, for the "sounding now" level. */
@@ -398,6 +430,7 @@ class PcmStreamPlayer {
     // boundary of the previous one.
     if (this.#nextTime < now + 0.02) this.#nextTime = now + 0.02
     const start = this.#nextTime
+    if (this.#firstStart === null) this.#firstStart = start
     source.start(start)
     this.#nextTime += buffer.duration
     this.#levels.push({ start, end: this.#nextTime, rms })
@@ -424,6 +457,19 @@ class PcmStreamPlayer {
   /** True once everything fed so far has finished playing. */
   get drained(): boolean {
     return this.pendingSeconds <= 0.01
+  }
+
+  /**
+   * Fraction (0..1) of the scheduled audio already sounding, biased backward
+   * by `leadSeconds` so the karaoke mark never runs ahead of the voice.
+   */
+  progress(leadSeconds: number): number {
+    const first = this.#firstStart
+    if (first === null) return 0
+    const total = this.#nextTime - first
+    if (total <= 0) return 0
+    const played = Math.max(0, this.#context.currentTime - first - leadSeconds)
+    return Math.min(1, played / total)
   }
 
   /** Stop now (barge-in / skip): unschedule everything, drop queued audio. */
@@ -485,7 +531,10 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     let settled = false
     let ready = false
     let sawAudio = false
-    let played = 0
+    /** Cleaned chars appended to the vendor so far (the progress denominator). */
+    let charsPushed = 0
+    let lastReported = -1
+    let ticker: number | null = null
     const pending: string[] = []
     let resolveDone: (() => void) | null = null
     let failDone: ((error: Error) => void) | null = null
@@ -494,9 +543,24 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       failDone = reject
     })
 
+    const stopTick = (): void => {
+      if (ticker !== null) {
+        window.clearInterval(ticker)
+        ticker = null
+      }
+    }
+    /** Lock the marker onto the full text once no more audio is coming. */
+    const finalizeProgress = (): void => {
+      stopTick()
+      if (charsPushed !== lastReported) {
+        lastReported = charsPushed
+        onProgress?.(charsPushed)
+      }
+    }
     const settleFail = (message: string): void => {
       if (settled) return
       settled = true
+      stopTick()
       socket?.close()
       player?.cancel()
       failDone?.(new Error(message))
@@ -504,6 +568,7 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     const settleCancel = (): void => {
       if (settled) return
       settled = true
+      stopTick()
       socket?.close()
       player?.cancel()
       resolveDone?.()
@@ -515,9 +580,22 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
         setTimeout(() => drain(), 100)
         return
       }
+      finalizeProgress()
       settled = true
       try { socket?.close() } catch { /* already down */ }
       resolveDone?.()
+    }
+    /**
+     * Playback-driven marker: the audio clock says how much of the scheduled
+     * speech has sounded; the pushed-text total scales it to characters. The
+     * conservative lead keeps the estimate behind the voice, never ahead.
+     */
+    const reportEstimate = (): void => {
+      if (settled || player === null) return
+      const estimate = Math.round(charsPushed * player.progress(MARK_LEAD_S))
+      if (estimate === lastReported) return
+      lastReported = estimate
+      onProgress?.(estimate)
     }
 
     try {
@@ -568,6 +646,7 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
           // The bridge closes after `finished` (normal) or on failure; an
           // un-signalled close with no audio at all is an error surface.
           if (sawAudio) {
+            finalizeProgress()
             settled = true
             resolveDone?.()
           } else {
@@ -585,10 +664,9 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     const session: TtsSession = {
       push: (text) => {
         if (settled || ended || text === '') return
-        // Realtime synthesis starts on append; audio follows within a beat,
-        // so the push position is the marker (slightly leading the speaker).
-        played += text.length
-        onProgress?.(played)
+        // Bookkeeping only: progress is driven by the audio clock below, not
+        // by the push position (that led the speaker by whole sentences).
+        charsPushed += text.length
         if (!ready || socket === null) {
           pending.push(text)
           return
@@ -608,6 +686,7 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     // Register on the provider so cancel() (skip / barge-in / hang-up) can
     // reach a session the controller created directly.
     this.#activeSession = session
+    ticker = window.setInterval(reportEstimate, MARK_TICK_MS)
     return session
   }
 

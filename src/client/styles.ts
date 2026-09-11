@@ -217,7 +217,7 @@ body[data-ds-dark-theme] .dsh-voice-rate-ticks i { background: rgba(255, 255, 25
 body[data-ds-dark-theme] .dsh-voice-rate-ticks i.is-active { background: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-jump { background: #232A3B; border-color: rgba(255, 255, 255, .12); }
 body[data-ds-dark-theme] .dsh-voice-jump i { border-color: rgba(230, 237, 247, .7); }
-body[data-ds-dark-theme] .dsh-voice-marked { background: rgba(106, 184, 255, .16); }
+body[data-ds-dark-theme] .dsh-voice-marked { background: rgba(106, 184, 255, .24); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head { color: rgba(230, 237, 247, .55); }
 body[data-ds-dark-theme] .dsh-voice-reasoning-head:hover { color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-reasoning-body { background: rgba(255, 255, 255, .05); color: rgba(230, 237, 247, .7); }
@@ -630,10 +630,13 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   white-space: pre-wrap; word-break: break-word;
 }
 .dsh-voice-prose + .dsh-voice-prose, .dsh-voice-prose + .dsh-voice-code, .dsh-voice-code + .dsh-voice-prose { margin-top: 8px; }
-/* karaoke marker: the run the readout has already played */
+/* karaoke marker: the run the readout has already played. The padding +
+   negative margin widens the tinted band without shifting the text. */
 .dsh-voice-marked {
-  background: rgba(0, 122, 255, .10);
-  border-radius: 4px;
+  background: rgba(0, 122, 255, .14);
+  padding: .12em .3em;
+  margin: -.12em -.3em;
+  border-radius: .35em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }

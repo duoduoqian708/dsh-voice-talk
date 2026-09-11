@@ -24,7 +24,8 @@ export interface VoiceStatus {
   readonly micMuted: boolean
   /** Turn whose readout is playing (karaoke marker target); null when idle. */
   readonly spokenTurn: number | null
-  /** Cleaned characters of the spoken turn handed to the engine so far. */
+  /** Cleaned characters of the spoken turn actually PLAYED, snapped up to a
+   *  sentence boundary (the karaoke mark never runs ahead of the voice). */
   readonly spokenChars: number
   /** Speech-start epoch of the current utterance (60s cap UI); null = none. */
   readonly utteranceStartAt: number | null

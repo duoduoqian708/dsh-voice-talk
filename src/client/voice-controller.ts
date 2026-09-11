@@ -379,6 +379,12 @@ export class VoiceController {
   #sawTurnActivity = false
   /** Turn id the karaoke marker points at (set as the flushes happen). */
   #spokenTurnId: number | null = null
+  /** Cumulative CLEANED chars pushed to the speaker this round (snap space). */
+  #spokenPushedChars = 0
+  /** Sentence-end offsets (cumulative cleaned chars) of everything pushed. */
+  readonly #spokenSentenceEnds: number[] = []
+  /** Last snapped value written to the status (change-gated patching). */
+  #spokenMarkChars = 0
   /** Bumped per submitted round; a settle from a superseded round is inert. */
   #roundToken = 0
   /** Session-scoped rate override (null = SESSION_BASE_RATE); survives hang-ups. */
@@ -1129,6 +1135,18 @@ export class VoiceController {
     const piece = pending.slice(0, take)
     this.#streamFed += take
     this.#spokenText = (this.#spokenText ?? '') + piece
+    // Book-keep where every sentence ends in the cumulative pushed text: the
+    // karaoke mark snaps onto these offsets, so it only ever stops at
+    // punctuation and never runs past what the speaker has actually reached.
+    const base = this.#spokenPushedChars
+    for (const match of piece.matchAll(/[。！？；.!?]/g)) {
+      this.#spokenSentenceEnds.push(base + (match.index ?? 0) + 1)
+    }
+    this.#spokenPushedChars = base + piece.length
+    if (final && this.#spokenSentenceEnds[this.#spokenSentenceEnds.length - 1] !== this.#spokenPushedChars) {
+      // The turn's tail may end without punctuation: make it markable.
+      this.#spokenSentenceEnds.push(this.#spokenPushedChars)
+    }
     this.#ensureSession()?.push(piece)
   }
 
@@ -1190,7 +1208,31 @@ export class VoiceController {
     this.#spokenTail = null
     this.#spokenTailUntil = 0
     this.#spokenTurnId = null
+    this.#spokenPushedChars = 0
+    this.#spokenSentenceEnds.length = 0
+    this.#spokenMarkChars = 0
     this.status.patch({ spokenTurn: null, spokenChars: 0 })
+  }
+
+  /**
+   * Speaker-reported playback position (cleaned chars, best effort) → the
+   * karaoke mark: snap UP to the next sentence end, so the tint covers the
+   * sentence being read and always stops at punctuation (never mid-sentence,
+   * never past the pushed text). Change-gated and monotone within a round:
+   * one status write per sentence, regardless of how often the engine ticks.
+   */
+  #applySpokenProgress(chars: number): void {
+    const ends = this.#spokenSentenceEnds
+    let snapped = ends.length === 0 ? 0 : ends[ends.length - 1]!
+    for (const end of ends) {
+      if (end >= chars) {
+        snapped = end
+        break
+      }
+    }
+    if (snapped <= this.#spokenMarkChars) return
+    this.#spokenMarkChars = snapped
+    this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: snapped })
   }
 
   /** Open (or reuse) the synthesis session for the upcoming sentences. */
@@ -1203,7 +1245,7 @@ export class VoiceController {
     try {
       const opts = { rate: settings.rate, lang: settings.voiceLang, voiceName: speaker, params: themeParams(settings) }
       const interrupted = (): void => { /* interrupted: the recognizer's next final drives the loop */ }
-      const progress = (chars: number): void => this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: chars })
+      const progress = (chars: number): void => this.#applySpokenProgress(chars)
       // Extracting the method into the old `?? fallback` one-liner dropped
       // `this` (strict-mode detached call): both providers register the
       // session on the instance there (#activeSession), so it threw.
