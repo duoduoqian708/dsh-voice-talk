@@ -1,6 +1,6 @@
 {
   "name": "dsh-voice-talk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Voice conversation mode for the DeepSeek Harness Web GUI: mic input with auto-submit, streaming spoken readout of replies, and a hands-free multi-turn loop with barge-in.",
   "type": "module",
   "main": "lib/index.js",
