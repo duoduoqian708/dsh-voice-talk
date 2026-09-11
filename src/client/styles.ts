@@ -233,6 +233,51 @@ body[data-ds-dark-theme] .dsh-voice-link { color: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-table th, body[data-ds-dark-theme] .dsh-voice-table td { border-color: rgba(255, 255, 255, .14); }
 body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .06); }
 
+/* host dark theme: call overlay + session stream. Colors only — no layout,
+   sizing, motion or interaction rule is touched, and every selector here is
+   inert under the light theme. */
+body[data-ds-dark-theme] .dsh-voice-call { background: #151517; color: #E6EDF7; color-scheme: dark; }
+body[data-ds-dark-theme] .dsh-voice-card,
+body[data-ds-dark-theme] .dsh-voice-modal { color-scheme: dark; }
+body[data-ds-dark-theme] .dsh-voice-left,
+body[data-ds-dark-theme] .dsh-voice-right {
+  background: #1C2230;
+  border-color: rgba(255, 255, 255, .1);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .45), 0 1px 2px rgba(0, 0, 0, .3);
+}
+body[data-ds-dark-theme] .dsh-voice-duration,
+body[data-ds-dark-theme] .dsh-voice-state-word { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-avatar-circle {
+  background: #232A3B; border-color: rgba(255, 255, 255, .12); color: #E6EDF7;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+}
+body[data-ds-dark-theme] .dsh-voice-wave-bar { background: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-live-interim { color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-live-error { color: #FF6961; }
+body[data-ds-dark-theme] .dsh-voice-skip { color: #6AB8FF; }
+body[data-ds-dark-theme] .dsh-voice-live-warn,
+body[data-ds-dark-theme] .dsh-voice-card-warn,
+body[data-ds-dark-theme] .dsh-voice-engine-status.is-missing { color: #FFB020; }
+body[data-ds-dark-theme] .dsh-voice-live > div,
+body[data-ds-dark-theme] .dsh-voice-stream,
+body[data-ds-dark-theme] .dsh-voice-reasoning-body { scrollbar-color: rgba(255, 255, 255, .25) transparent; }
+body[data-ds-dark-theme] .dsh-voice-msg-ai .dsh-voice-msg-body { background: #232A3B; color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-typing { background: #232A3B; }
+body[data-ds-dark-theme] .dsh-voice-typing i { background: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-typing-label { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-caret { background: rgba(230, 237, 247, .6); }
+body[data-ds-dark-theme] .dsh-voice-collapse {
+  background: #232A3B; border-color: rgba(255, 255, 255, .12);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+}
+body[data-ds-dark-theme] .dsh-voice-collapse:hover { background: #2A3145; }
+body[data-ds-dark-theme] .dsh-voice-collapse i { border-color: rgba(230, 237, 247, .7); }
+body[data-ds-dark-theme] .dsh-voice-setup-note { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-setup-link { color: #6AB8FF; }
+body[data-ds-dark-theme] .dsh-voice-modal-close:hover { background: rgba(255, 255, 255, .08); }
+body[data-ds-dark-theme] .dsh-voice-modal-divider { color: rgba(230, 237, 247, .55); }
+body[data-ds-dark-theme] .dsh-voice-modal-divider::after { background: rgba(255, 255, 255, .12); }
+
 /* ---- call overlay: light canvas, two glass tiles ----
    Performance contract: the canvas is a STATIC opaque light gradient (no
    filter, no animation), and the two big tiles carry NO backdrop-filter —
