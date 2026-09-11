@@ -210,10 +210,9 @@ body[data-ds-dark-theme] .dsh-voice-speaker-item { color: #E6EDF7; }
 body[data-ds-dark-theme] .dsh-voice-speaker-item:hover { background: rgba(255, 255, 255, .08); }
 body[data-ds-dark-theme] .dsh-voice-speaker-item[data-current='true'],
 body[data-ds-dark-theme] .dsh-voice-speaker-check { color: #6AB8FF; }
-body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-webkit-slider-runnable-track { background: rgba(255, 255, 255, .2); }
-body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-moz-range-track { background: rgba(255, 255, 255, .2); }
-body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-webkit-slider-thumb { background: #E6EDF7; border-color: rgba(0, 0, 0, .35); }
-body[data-ds-dark-theme] .dsh-voice-rate-magnet input[type='range']::-moz-range-thumb { background: #E6EDF7; border-color: rgba(0, 0, 0, .35); }
+body[data-ds-dark-theme] .dsh-voice-rate-track { background: rgba(255, 255, 255, .2); }
+body[data-ds-dark-theme] .dsh-voice-rate-fill { background: #6AB8FF; }
+body[data-ds-dark-theme] .dsh-voice-rate-thumb { background: #E6EDF7; border-color: rgba(0, 0, 0, .35); }
 body[data-ds-dark-theme] .dsh-voice-rate-ticks i { background: rgba(255, 255, 255, .25); }
 body[data-ds-dark-theme] .dsh-voice-rate-ticks i.is-active { background: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-jump { background: #232A3B; border-color: rgba(255, 255, 255, .12); }
@@ -392,7 +391,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 /* ---- controls row: three independent controls (speaker / rate / hang-up) ---- */
 .dsh-voice-controls {
   margin-top: auto;
-  width: 100%; max-width: 560px;
+  width: 100%; max-width: 620px;
   display: flex; align-items: center; justify-content: space-between;
   gap: 28px;
 }
@@ -463,29 +462,60 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   color: #1D1D1F; font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
-.dsh-voice-rate-magnet { position: relative; display: inline-flex; flex-direction: column; gap: 3px; width: 150px; }
+/* rate: custom magnet slider — a transparent native range on top, the track/
+   fill/thumb below it follow --dsh-rate-ratio (set imperatively per input
+   event, so a drag never waits on React; the snap class animates the glide). */
+.dsh-voice-rate-magnet { position: relative; display: inline-flex; flex-direction: column; gap: 3px; width: 200px; }
+.dsh-voice-rate-track,
+.dsh-voice-rate-fill {
+  position: absolute; top: 7px; height: 4px; border-radius: 2px; pointer-events: none;
+}
+.dsh-voice-rate-track { left: 0; right: 0; background: rgba(0, 0, 0, .12); }
+.dsh-voice-rate-fill {
+  left: 0;
+  width: calc(9px + var(--dsh-rate-ratio, 0) * (100% - 18px));
+  background: #007AFF;
+}
+.dsh-voice-rate-thumb {
+  position: absolute; top: 0; left: calc(var(--dsh-rate-ratio, 0) * (100% - 18px));
+  width: 18px; height: 18px; border-radius: 50%; pointer-events: none;
+  background: #fff; border: 1px solid rgba(0, 0, 0, .15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+  transition: transform .12s ease;
+}
+.dsh-voice-rate-magnet:hover .dsh-voice-rate-thumb { transform: scale(1.08); }
+.dsh-voice-rate-magnet.is-dragging .dsh-voice-rate-thumb { transform: scale(1.15); }
+.dsh-voice-rate-magnet.is-snapping .dsh-voice-rate-thumb {
+  transition: left .16s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), transform .12s ease;
+}
+.dsh-voice-rate-magnet.is-snapping .dsh-voice-rate-fill {
+  transition: width .16s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
+}
 .dsh-voice-rate-magnet input[type='range'] {
   appearance: none; -webkit-appearance: none;
+  position: relative; z-index: 2;
   width: 100%; height: 18px; margin: 0; background: none; cursor: pointer;
+  touch-action: none;
+}
+.dsh-voice-rate-magnet input[type='range']:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, .55); outline-offset: 3px; border-radius: 10px;
 }
 .dsh-voice-rate-magnet input[type='range']::-webkit-slider-runnable-track {
-  height: 4px; border-radius: 2px; background: rgba(0, 0, 0, .12);
+  height: 4px; background: transparent;
 }
 .dsh-voice-rate-magnet input[type='range']::-webkit-slider-thumb {
   appearance: none; -webkit-appearance: none;
-  width: 16px; height: 16px; margin-top: -6px; border-radius: 50%;
-  background: #fff; border: 1px solid rgba(0, 0, 0, .15);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+  width: 18px; height: 18px; margin-top: -7px; border-radius: 50%;
+  background: transparent; border: none; box-shadow: none;
 }
 .dsh-voice-rate-magnet input[type='range']::-moz-range-track {
-  height: 4px; border-radius: 2px; background: rgba(0, 0, 0, .12);
+  height: 4px; background: transparent;
 }
 .dsh-voice-rate-magnet input[type='range']::-moz-range-thumb {
-  width: 16px; height: 16px; border-radius: 50%;
-  background: #fff; border: 1px solid rgba(0, 0, 0, .15);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+  width: 18px; height: 18px; border-radius: 50%;
+  background: transparent; border: none; box-shadow: none;
 }
-.dsh-voice-rate-ticks { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; }
+.dsh-voice-rate-ticks { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; pointer-events: none; }
 .dsh-voice-rate-ticks i { width: 4px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, .18); }
 .dsh-voice-rate-ticks i.is-active { background: #007AFF; }
 
@@ -755,7 +785,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   .dsh-voice-speaker-btn { max-width: 170px; padding: 0 14px; }
   .dsh-voice-speaker-pop { width: 240px; height: 260px; }
   .dsh-voice-rate-control { padding: 0 14px; gap: 10px; }
-  .dsh-voice-rate-magnet { width: 110px; }
+  .dsh-voice-rate-magnet { width: 140px; }
   .dsh-voice-hangup-ctl { width: 64px; height: 64px; }
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
   .dsh-voice-duration { margin-top: 2px; }
@@ -770,6 +800,8 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   }
   .dsh-voice-wave-bar { transform: none !important; }
   .dsh-voice-whale, .dsh-voice-mickey { transform: none !important; }
+  .dsh-voice-rate-magnet.is-snapping .dsh-voice-rate-thumb,
+  .dsh-voice-rate-magnet.is-snapping .dsh-voice-rate-fill { transition: none !important; }
 }
 `
 

@@ -19,7 +19,6 @@ import type { ObservableSource } from './store.ts'
 import { CallBreath } from './voice-wave.ts'
 import { WavePrint } from './wave-print.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
-import { nearestRateLabel } from './voice-settings.ts'
 import { RateMagnetSlider } from './rate-magnet.tsx'
 import { rawPrefixForCleaned } from './readout.ts'
 import { Markdown } from './markdown.tsx'
@@ -511,7 +510,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         <div className='dsh-voice-controls'>
           <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} />
           <div className='dsh-voice-rate-control' title='语速（仅本会话）'>
-            <span className='dsh-voice-ctl-value'>{nearestRateLabel(rate)}</span>
             <RateMagnetSlider rate={rate} onChange={setRateOverride} />
           </div>
           <button
