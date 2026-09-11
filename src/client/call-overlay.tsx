@@ -47,7 +47,7 @@ export interface CallOverlayProps {
   /** Persist one settings field (settings-page writes ride the wire). */
   setField(field: string, value: unknown): void
   /** Live resolved settings (rate/voiceName read here per render). */
-  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
+  settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; storedSpeakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
   /** Namespace-bound translator (the framework locale seat). */
   t: VoiceTranslate
 }
@@ -439,6 +439,8 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   // Hooks stay above the `mode !== 'loop'` early return — a conditional hook
   // crashes the overlay on the loop-on render (mic click looked dead).
   const utteranceStartAt = useVoice(s => s.utteranceStartAt)
+  // Subscribed so a HUD voice pick re-renders the picker's label at once.
+  const sessionSpeaker = useVoice(s => s.sessionSpeaker)
 
   // Duration of the CURRENT call: reset on every armed loop (hang-up → reopen
   // starts from 00:00), not the session's total age. Accrues only while the
@@ -632,7 +634,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         <LiveTranscript text={phase === 'listening' && !micMuted ? interim : ''} />
 
         <div className='dsh-voice-controls'>
-          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} t={t} />
+          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} muted={micMuted} sessionSpeaker={sessionSpeaker} t={t} />
           <div className='dsh-voice-rate-control' title={t('hud.rateTitle')}>
             <RateMagnetSlider rate={rate} onChange={setRateOverride} t={t} />
           </div>
@@ -741,19 +743,25 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
  * The dropdown itself is the shared VoicePicker (same component the settings
  * provider modal uses).
  */
-function SpeakerPicker({ settings, setVoiceOverride, phase, t }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase']; t: VoiceTranslate }): ReactElement {
+function SpeakerPicker({ settings, setVoiceOverride, phase, muted, sessionSpeaker, t }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; storedSpeakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase']; muted: boolean; sessionSpeaker: string | null; t: VoiceTranslate }): ReactElement {
   const theme = settings().ttsTheme
   // A stored '' (the retired 主题默认 option) reads as the theme default.
-  const storedSpeaker = settings().speakerByTheme[theme]
-  const current = (storedSpeaker === undefined || storedSpeaker === '')
+  // The persisted default (settings page), resolved with the built-in
+  // fallback; the HUD's current pick is the session override on top of it.
+  const persisted = settings().storedSpeakerByTheme[theme]
+  const resolved = (persisted === undefined || persisted === '')
     ? (voiceThemeOf(theme)?.defaultSpeaker ?? settings().voiceName)
-    : storedSpeaker
+    : persisted
+  const current = sessionSpeaker ?? resolved
+  // The (default) mark tracks the SAVED default, not the session override:
+  // switching voices mid-call must not move the mark.
+  const savedDefault = persisted
   return (
     <VoicePicker
       options={speakersForTheme(theme, settings().voiceLang)}
       value={current}
-      defaultId={voiceThemeOf(theme)?.defaultSpeaker ?? ''}
-      locked={phase === 'thinking' || phase === 'speaking'}
+      defaultId={savedDefault !== undefined && savedDefault !== '' ? savedDefault : (voiceThemeOf(theme)?.defaultSpeaker ?? '')}
+      locked={!muted && (phase === 'thinking' || phase === 'speaking')}
       lockHint={t('picker.lockHint')}
       t={t}
       ariaLabel={t('picker.speakerAria')}

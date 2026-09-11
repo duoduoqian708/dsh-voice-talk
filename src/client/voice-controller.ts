@@ -452,7 +452,7 @@ export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
     pendingCount: 0, error: null, micMuted: false, spokenTurn: null, spokenChars: 0, spokenFrom: 0,
-    utteranceStartAt: null,
+    utteranceStartAt: null, sessionSpeaker: null,
   })
 
   /** The session's message stream for the call overlay's right-hand column. */
@@ -570,11 +570,15 @@ export class VoiceController {
   /** Enter the hands-free loop (the mic button's on arm). */
   startLoop(): void {
     if (this.status.getSnapshot().mode === 'loop') return
+    // Every new call starts from the stored defaults: the HUD's temporary
+    // voice/rate picks never leak across calls (they only live inside one).
+    this.#sessionRate = null
+    this.#sessionSpeaker = null
     this.#lastSpokenSeq = this.#latestAssistantSeq()
     // The overlay's first render needs the mirror ready — sync BEFORE the
     // mode flips (the subscription only mirrors while already in loop).
     this.#syncTranscript()
-    this.status.patch({ mode: 'loop', error: null, lastPrompt: '' })
+    this.status.patch({ mode: 'loop', error: null, lastPrompt: '', sessionSpeaker: null })
     this.#armListening()
     // Entering with a blocking wait already pending: handle it right away.
     this.#checkPending()
@@ -583,7 +587,7 @@ export class VoiceController {
   /** Leave any voice activity: stop everything and go idle (pure off switch). */
   stopVoice(): void {
     this.#disarmAll()
-    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', micMuted: false, spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null })
+    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', micMuted: false, spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null, sessionSpeaker: null })
   }
 
   /**
@@ -609,15 +613,18 @@ export class VoiceController {
 
   /**
    * Session-scope rate override (call HUD writes). Effective immediately,
-   * survives hang-ups within this session, dies with the session itself.
+   * lives only inside the current call: a new call starts from the stored
+   * defaults (startLoop clears it).
    */
   setSessionRate(rate: number): void {
     this.#sessionRate = rate
   }
 
-  /** Session-scope speaker override (same lifecycle as the rate override). */
+  /** Session-scope speaker override (same lifecycle as the rate override).
+   *  Cleared on every startLoop: temporary picks never cross calls. */
   setSessionSpeaker(voice: string): void {
     this.#sessionSpeaker = voice
+    this.status.patch({ sessionSpeaker: voice })
   }
 
   /**
@@ -1327,7 +1334,7 @@ export class VoiceController {
     if (mode !== 'loop') {
       this.#recognitionHandle?.stop()
       this.#recognitionHandle = null
-      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null })
+      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null, sessionSpeaker: null })
       return
     }
     // Cooldown: let the speaker tail decay, then listen again. The tail of

@@ -33,6 +33,10 @@ export interface VoiceStatus {
   readonly spokenFrom: number
   /** Speech-start epoch of the current utterance (60s cap UI); null = none. */
   readonly utteranceStartAt: number | null
+  /** HUD-picked voice for the current call; null = the stored default. The
+   *  field exists so a pick re-renders the HUD immediately (settings() is a
+   *  plain read, not a subscribed source). */
+  readonly sessionSpeaker: string | null
 }
 
 /** One selectable option of a question interaction (questions protocol). */
