@@ -21,6 +21,7 @@ import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { BridgeError, bridgeErrorPayload } from './bridge-error.ts'
 import type { WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 
 /** Shipped presets (settings may override both per theme). */
@@ -53,11 +54,11 @@ interface QwenUpstreamHandlers {
 /** Resolve the DashScope API key host-side (shared with the ASR bridge). */
 export async function resolveApiKey(ctx: Context): Promise<string> {
   const creds = ctx.get('credentials')
-  if (creds === undefined) throw new Error('凭证服务不可用')
+  if (creds === undefined) throw new BridgeError('credentials-unavailable', '凭证服务不可用')
   const view = await creds.resolve(credentialRef('VOICE_QWEN_API_KEY')).catch(() => undefined)
   const key = view?.value
   if (key === undefined || key === '') {
-    throw new Error('未配置千问凭证：设置 → 语音对话 → 阿里千问 → 设置，粘贴 DashScope API Key')
+    throw new BridgeError('missing-qwen-credentials', '未配置千问凭证：设置 → 语音对话 → 阿里千问 → 设置，粘贴 DashScope API Key')
   }
   return key
 }
@@ -324,7 +325,7 @@ async function serveQwenClient(ctx: Context, ws: import('ws').WebSocket): Promis
           })
           sendJson({ type: 'ready' })
         } catch (error) {
-          sendJson({ type: 'error', error: error instanceof Error ? error.message : String(error) })
+          sendJson({ type: 'error', ...bridgeErrorPayload(error) })
           tearDown()
         }
       })()

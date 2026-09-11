@@ -45,6 +45,7 @@ import { createHmac } from 'node:crypto'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { resolveApiKey } from './tts-qwen.ts'
+import { BridgeError, bridgeErrorPayload } from './bridge-error.ts'
 
 /** Shipped preset (a settings draft may override per connection). */
 export const QWEN_ASR_MODEL = 'qwen3-asr-flash-realtime'
@@ -225,14 +226,14 @@ interface IatResultFrame {
  */
 async function openXfyunUpstream(ctx: Context, lang: string, endpointOverride: string | undefined, handlers: AsrUpstreamHandlers): Promise<AsrUpstream> {
   const creds = ctx.get('credentials')
-  if (creds === undefined) throw new Error('凭证服务不可用')
+  if (creds === undefined) throw new BridgeError('credentials-unavailable', '凭证服务不可用')
   const [appId, apiKey, apiSecret] = await Promise.all([
     creds.resolve(credentialRef('VOICE_XF_APP_ID')).catch(() => undefined),
     creds.resolve(credentialRef('VOICE_XF_API_KEY')).catch(() => undefined),
     creds.resolve(credentialRef('VOICE_XF_API_SECRET')).catch(() => undefined),
   ])
   if (appId?.value === undefined || appId.value === '' || apiKey?.value === undefined || apiKey.value === '' || apiSecret?.value === undefined || apiSecret.value === '') {
-    throw new Error('未配置讯飞凭证：设置 → 语音对话 → 讯飞 → 设置，填写 App ID / API Key / API Secret')
+    throw new BridgeError('missing-xfyun-credentials', '未配置讯飞凭证：设置 → 语音对话 → 讯飞 → 设置，填写 App ID / API Key / API Secret')
   }
   const { WebSocket } = await import('ws')
   // Same HMAC-SHA256 handshake scheme the TTS bridge signs (authorization /
@@ -435,7 +436,7 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
             console.error('[voice-asr] hello 失败:', vendor, message)
             // Send past the closed-guard: the upstream close event can race the
             // rejection here, and the browser must still learn WHY it failed.
-            try { ws.send(JSON.stringify({ type: 'error', error: message })) } catch { /* down */ }
+            try { ws.send(JSON.stringify({ type: 'error', ...bridgeErrorPayload(error) })) } catch { /* down */ }
             tearDown()
           }
         })()

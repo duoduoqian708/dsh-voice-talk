@@ -17,6 +17,7 @@ import { createHmac } from 'node:crypto'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { synthQwenOnce, type QwenSessionParams } from './tts-qwen.ts'
+import { BridgeError, bridgeErrorPayload } from './bridge-error.ts'
 
 const TTS_BRIDGE_PREFIX = '/voice-tts'
 
@@ -114,9 +115,9 @@ export function makeVoiceTtsRoutes(ctx: Context): WebRoute[] {
       const text = body?.text?.trim() ?? ''
       const voice = body?.voice?.trim() || ''
       const rate = typeof body?.rate === 'number' ? body.rate : 1
-      if (text === '') return json(res, 400, { error: '文本为空' })
+      if (text === '') return json(res, 400, bridgeErrorPayload(new BridgeError('empty-text', '文本为空')))
       const synth = SYNTHS[provider]
-      if (synth === undefined) return json(res, 404, { error: '未知供应商' })
+      if (synth === undefined) return json(res, 404, bridgeErrorPayload(new BridgeError('unknown-vendor', '未知供应商')))
       try {
         const audio = await synth(ctx, text, voice, rate, body)
         res.writeHead(200, {
@@ -125,7 +126,7 @@ export function makeVoiceTtsRoutes(ctx: Context): WebRoute[] {
         })
         res.end(audio)
       } catch (error) {
-        json(res, 400, { error: error instanceof Error ? error.message : String(error) })
+        json(res, 400, bridgeErrorPayload(error))
       }
     },
   })
@@ -149,14 +150,14 @@ async function synthXfyun(
   ctx: Context, text: string, voice: string, rate: number, endpointOverride?: string,
 ): Promise<Buffer> {
   const creds = ctx.get('credentials')
-  if (creds === undefined) throw new Error('凭证服务不可用')
+  if (creds === undefined) throw new BridgeError('credentials-unavailable', '凭证服务不可用')
   const [appId, apiKey, apiSecret] = await Promise.all([
     creds.resolve(credentialRef('VOICE_XF_APP_ID')).catch(() => undefined),
     creds.resolve(credentialRef('VOICE_XF_API_KEY')).catch(() => undefined),
     creds.resolve(credentialRef('VOICE_XF_API_SECRET')).catch(() => undefined),
   ])
   if (apiKey?.value === undefined || apiKey.value === '' || apiSecret?.value === undefined || apiSecret.value === '' || appId?.value === undefined || appId.value === '') {
-    throw new Error('未配置讯飞凭证：设置 → 语音对话 → 讯飞 → 设置，填写 App ID / API Key / API Secret')
+    throw new BridgeError('missing-xfyun-credentials', '未配置讯飞凭证：设置 → 语音对话 → 讯飞 → 设置，填写 App ID / API Key / API Secret')
   }
   const { WebSocket } = await import('ws')
   // iFlytek WebSocket auth ≠ Bearer. It wants three query params derived from
