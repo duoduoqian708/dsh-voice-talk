@@ -13,42 +13,24 @@ DSH Web 的语音对话模式：点一下麦克风进入全屏通话，边说边
 
 ### 1. 安装
 
-**推荐：npm 安装**
-
 ```sh
 dsh plugin --profile web add dsh-voice-talk
+dsh web   # 装完重启
 ```
 
-装完重启：
-
-```sh
-dsh web
-```
-
-**源码安装**
-
-想跟进开发、或使用尚未发布的版本时用它：
+源码安装：
 
 ```sh
 git clone https://github.com/duoduoqian708/dsh-voice-talk.git
-cd dsh-voice-talk
-npm install && npm run build
+cd dsh-voice-talk && npm install && npm run build
 dsh plugin --profile web add /path/to/dsh-voice-talk
 ```
 
-- `npm run typecheck` 类型检查；`npm run build` 产出 `lib/index.js`（host 半边）与 `lib/client.js`（浏览器半边）。
+需要 dsh ≥ 0.1.0-rc.7（`web` profile）、Chrome / Edge、麦克风权限与网络。
 
 ### 2. 配置大模型
 
-安装后，在 **设置 → 插件 → 语音对话** 里配置。
-
-推荐用千问：按量计费、没有套餐门槛，个人使用成本可控（约 0.00033 元 / 秒，不同模型价格不同），实测中文语音的自然度也最好。
-
-1. 到阿里云百炼申请一个 DashScope API Key：https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS
-2. 回设置页把 Key 填进千问的「设置」里——模型和地址都已内置，填一个 Key 就能用；想让「说」也用千问，顺手点一下它的「启用」。
-3. 给账户充一点钱即可。「听」必须用云端引擎，Key 填好后听说就都通了。
-
-讯飞也已内置，同样在设置页配置。
+设置 → 插件 → 语音对话。推荐千问：申请一个 DashScope API Key（https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS），填进千问的「设置」即可——模型和地址都已内置，充值就能用；想让「说」也用千问，点一下那一行的「启用」。讯飞也已内置，同样在设置页配置。
 
 ### 3. 开始使用
 
@@ -56,19 +38,9 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 ![输入框旁的麦克风入口](docs/screenshots/mic-entry.png)
 
-## 语音引擎
-
-| 用途 | 引擎 | 费用 | 凭证 |
-|---|---|---|---|
-| 说 | 系统语音 | 免费 · 离线 | 无需 |
-| 说 · 听 | **千问（主推）** | 约 0.00033 元 / 秒 | DashScope API Key |
-| 说 · 听 | 讯飞 | 每日免费额度 | APPID + API Key + API Secret |
-
-密钥入口：设置 → 插件 → 语音对话 → 对应引擎「设置」。填好后可点「试听 / 试音」验证。
-
 ## 配置项
 
-设置页里改的是持久默认；通话层上调的是**临时值**，每次新通话都回到默认。音色、语速在通话层也能临时调。
+设置页里改的是持久默认，通话层上调的只对本次通话有效。
 
 | 配置 | 说明 | 默认 |
 |---|---|---|
@@ -105,12 +77,6 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 假设你不想盯着屏幕，想到户外活动一下；假设你恰好开了代理端口——那就带着手机出门，边散步边聊开发吧。
 
 <img src="docs/screenshots/call-mode-mobile.png" alt="手机上的通话层" width="240">
-
-## 环境要求
-
-- dsh ≥ 0.1.0-rc.7，`web` profile
-- Chrome / Edge
-- 麦克风权限；云端识别需要网络
 
 ## 问题反馈
 
