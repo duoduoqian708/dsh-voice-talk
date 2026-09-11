@@ -540,10 +540,16 @@ export class VoiceController {
     this.#recognitionHandle = recognizer.start({
       onInterim: interim => {
         this.status.patch({ interim: this.#composeInterim(interim) })
-        // The 60s cap opens on the FIRST recognized text, never on raw mic
-        // energy: wind, keyboards, and room noise must not start the clock —
-        // only text the cloud model actually produced counts as input.
-        if (hasRecognizedText(interim)) this.#openUtteranceWindow()
+        if (hasRecognizedText(interim)) {
+          // The 60s cap opens on the FIRST recognized text, never on raw mic
+          // energy: wind, keyboards, and room noise must not start the clock —
+          // only text the cloud model actually produced counts as input.
+          this.#openUtteranceWindow()
+          // The flush window counts from the LAST recognized text, not from
+          // the last vendor final: a final lands at a pause, so the old timer
+          // could expire mid-speech once the user resumed talking.
+          if (this.#pendingFinal !== null) this.#resetSilenceTimer()
+        }
       },
       onFinal: text => this.#onFinalUtterance(text),
       onEnd: () => { /* the recognizer reconnects itself */ },
@@ -693,13 +699,24 @@ export class VoiceController {
   #muteAfterEcho(): void {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
-    this.#pendingFinal = null
-    this.status.patch({ interim: '' })
+    // Keep #pendingFinal: the echo segment never reached the buffer, so what
+    // is held here is real finalized speech from before the hit — wiping it
+    // dropped the pre-pause half of a two-segment utterance. Only the flush
+    // countdown is put on hold while the mic is down.
+    if (this.#silenceTimer !== null) {
+      clearTimeout(this.#silenceTimer)
+      this.#silenceTimer = null
+    }
+    this.status.patch({ interim: this.#pendingFinal ?? '' })
     if (this.#echoMuteTimer !== null) clearTimeout(this.#echoMuteTimer)
     if (this.#rearmListeningAfterMute()) {
       this.#echoMuteTimer = setTimeout(() => {
         this.#echoMuteTimer = null
-        if (this.#rearmListeningAfterMute()) this.#startRecognition()
+        if (!this.#rearmListeningAfterMute()) return
+        this.#startRecognition()
+        // Nothing new has been recognized yet: give the kept buffer its own
+        // silence window so it cannot be stranded until the next utterance.
+        if (this.#pendingFinal !== null) this.#resetSilenceTimer()
       }, 2_000)
     }
   }

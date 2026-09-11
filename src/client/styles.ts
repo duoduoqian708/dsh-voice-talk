@@ -322,7 +322,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-wave[data-idle='true'] > svg { opacity: 0; }
 .dsh-voice-wave::after {
   content: ''; position: absolute; left: 0; right: 0; top: 50%;
-  height: 3px; margin-top: -1.5px; border-radius: 1.5px;
+  height: 1.5px; margin-top: -0.75px; border-radius: 0.75px;
   background: #7DD5D9; opacity: 0; transition: opacity .15s ease;
 }
 .dsh-voice-wave[data-idle='true']::after { opacity: 1; }
