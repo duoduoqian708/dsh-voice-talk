@@ -2,7 +2,7 @@
 
 Voice chat mode for DSH Web: tap the mic to enter a full-screen call, speak and listen as you go, and replies are read aloud as they stream. Bilingual UI, light/dark theme aware, with speech-rate and voice controls.
 
-English | [中文](README.md)
+[中文](README.md) | English
 
 [![npm version](https://img.shields.io/npm/v/dsh-voice-talk.svg)](https://www.npmjs.com/package/dsh-voice-talk)
 [![license](https://img.shields.io/npm/l/dsh-voice-talk.svg)](./LICENSE)

@@ -2,7 +2,7 @@
 
 DSH Web 的语音对话模式：点一下麦克风进入全屏通话，边说边听，AI 回复边生成边朗读。界面中英双语，适配明暗主题，支持语速调节与音色切换。
 
-[English](README.en.md) | 中文
+中文 | [English](README.en.md)
 
 [![npm version](https://img.shields.io/npm/v/dsh-voice-talk.svg)](https://www.npmjs.com/package/dsh-voice-talk)
 [![license](https://img.shields.io/npm/l/dsh-voice-talk.svg)](./LICENSE)
