@@ -12,7 +12,6 @@ export interface VoiceSettings {
   voiceName?: string
   ttsTheme?: string
   ttsParams?: Record<string, unknown>
-  maxReadoutChars?: number
   /** Speaker per theme id (themes have disjoint voice-name namespaces). */
   speakerByTheme?: Record<string, string>
   /** Default speech rate per theme id (falls back to `rate`). */
@@ -44,7 +43,6 @@ export const VOICE_DEFAULTS: Required<VoiceSettings> = {
   voiceName: '',
   ttsTheme: 'system',
   ttsParams: {},
-  maxReadoutChars: 0,
   speakerByTheme: {},
   rateByTheme: {},
   qwenModel: 'qwen3-tts-flash-realtime',
@@ -85,7 +83,6 @@ export function resolveSettings(section: VoiceSettings | undefined): Required<Vo
     voiceName: value.voiceName ?? VOICE_DEFAULTS.voiceName,
     ttsTheme: value.ttsTheme ?? VOICE_DEFAULTS.ttsTheme,
     ttsParams: value.ttsParams ?? VOICE_DEFAULTS.ttsParams,
-    maxReadoutChars: value.maxReadoutChars ?? VOICE_DEFAULTS.maxReadoutChars,
     speakerByTheme: value.speakerByTheme ?? VOICE_DEFAULTS.speakerByTheme,
     rateByTheme: value.rateByTheme ?? VOICE_DEFAULTS.rateByTheme,
     qwenModel: value.qwenModel ?? VOICE_DEFAULTS.qwenModel,

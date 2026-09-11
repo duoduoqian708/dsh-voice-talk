@@ -35,8 +35,6 @@ export interface Config {
   ttsTheme?: string
   /** Theme-private parameters (cloud voices: model/tone/style etc.). */
   ttsParams?: Record<string, unknown>
-  /** Readout safety valve in chars; 0 = unlimited (default). */
-  maxReadoutChars?: number
   /** Speaker voice per theme id (themes have disjoint voice namespaces). */
   speakerByTheme?: Record<string, string>
   /** Default speech rate per theme id (mirrors speakerByTheme; falls back to
@@ -70,7 +68,6 @@ export const Config: z<Config> = z.object({
   voiceName: z.string().default(''),
   ttsTheme: z.string().default('system'),
   ttsParams: z.any().default({}),
-  maxReadoutChars: z.number().min(0).max(5000).step(50).default(0),
   speakerByTheme: z.any().default({}),
   rateByTheme: z.any().default({}),
   qwenModel: z.string().default(QWEN_DEFAULT_MODEL),

@@ -805,9 +805,6 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
             onChange={next => { set('allowInterrupt', next) }} />
           <Field label='停顿多久自动发送（秒）' value={String(value.silenceTimeout)} placeholder='默认 2' disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
-          <Field label='播报字数上限' hint={value.maxReadoutChars === 0 ? '0 = 不限；播报自动剔除推理与代码' : '播报自动剔除推理与代码'}
-            value={String(value.maxReadoutChars)} placeholder='0 = 不限' disabled={disabled}
-            onCommit={next => { const n = Number(next); if (Number.isFinite(n) && n >= 0) set('maxReadoutChars', Math.min(5000, n)) }} />
         </div>
 
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
