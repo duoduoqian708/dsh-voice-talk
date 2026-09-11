@@ -107,7 +107,6 @@ type AsrWireEvent = {
   text?: string
   stash?: string
   transcript?: string
-  item_id?: string
   error?: { code?: string; message?: string }
 }
 
@@ -171,14 +170,7 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
         return
       }
       if (event.type === 'input_audio_buffer.speech_started') {
-        // TEMP TRACE (remove after the flush-window verification).
-        console.info('[voice-asr][trace]', 'speech_started', Date.now())
         handlers.onActivity()
-        return
-      }
-      if (event.type === 'input_audio_buffer.speech_stopped') {
-        // TEMP TRACE (remove after the flush-window verification).
-        console.info('[voice-asr][trace]', 'speech_stopped', Date.now(), event.item_id ?? '')
         return
       }
       if (event.type === 'conversation.item.input_audio_transcription.text') {
@@ -187,8 +179,6 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
         return
       }
       if (event.type === 'conversation.item.input_audio_transcription.completed') {
-        // TEMP TRACE (remove after the flush-window verification).
-        console.info('[voice-asr][trace]', 'completed', Date.now())
         handlers.onFinal(event.transcript ?? '')
         return
       }
@@ -200,8 +190,6 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
       }
     })
     socket.on('close', () => {
-      // TEMP TRACE (remove after the flush-window verification).
-      console.info('[voice-asr][trace]', 'upstream_close', Date.now())
       // A quiet upstream drop is NOT fatal: the browser reconnects and the
       // hello opens a fresh session (only vendor `error` frames are fatal).
       if (live && !ended) {

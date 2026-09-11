@@ -354,8 +354,6 @@ export class VoiceController {
    *  the user sees streaming. Flushes join it with #pendingFinal, so a pause
    *  or the 60s cap never drops the half-sentence on screen. */
   #liveInterim = ''
-  /** TEMP TRACE: arrival epoch of the last ASR liveness event. */
-  #lastAsrAt = 0
   /** Voice follow-up for a blocking approval/question (see #checkPending). */
   #pendingVoice: PendingVoiceState | null = null
   /** Waits already responded to; skipped until the snapshot drops them. */
@@ -550,7 +548,6 @@ export class VoiceController {
     const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
       onInterim: interim => {
-        this.#lastAsrAt = Date.now()
         this.#liveInterim = interim
         this.status.patch({ interim: this.#composeInterim(interim) })
         if (hasRecognizedText(interim)) {
@@ -565,7 +562,6 @@ export class VoiceController {
         }
       },
       onSpeech: () => {
-        this.#lastAsrAt = Date.now()
         // The vendor VAD heard live speech: whatever text gap follows is
         // capture latency, not the user pausing — keep the countdown alive.
         if (this.#silenceTimer !== null) this.#resetSilenceTimer()
@@ -611,7 +607,7 @@ export class VoiceController {
     this.#utteranceTimer = setTimeout(() => {
       this.#utteranceTimer = null
       // Cap reached: force the turn out even if the user keeps talking.
-      this.#flushPending('cap')
+      this.#flushPending()
     }, UTTERANCE_CAP_MS)
   }
 
@@ -651,7 +647,6 @@ export class VoiceController {
     // (abort races, timeout degrade) — it must never reach the composer.
     if (this.status.getSnapshot().mode !== 'loop') return
     if (this.status.getSnapshot().micMuted) return
-    this.#lastAsrAt = Date.now()
     // A final ends its item: the item's live partial is now superseded by
     // the accumulated #pendingFinal (display continuity is patched below).
     this.#liveInterim = ''
@@ -773,10 +768,10 @@ export class VoiceController {
   #resetSilenceTimer(): void {
     if (this.#silenceTimer !== null) clearTimeout(this.#silenceTimer)
     const seconds = resolveSettings(this.#deps.settings()).silenceTimeout
-    this.#silenceTimer = setTimeout(() => this.#flushPending('silence'), seconds * 1000)
+    this.#silenceTimer = setTimeout(() => this.#flushPending(), seconds * 1000)
   }
 
-  #flushPending(reason: 'silence' | 'cap'): void {
+  #flushPending(): void {
     if (this.#silenceTimer !== null) {
       clearTimeout(this.#silenceTimer)
       this.#silenceTimer = null
@@ -794,12 +789,6 @@ export class VoiceController {
       : (live === '' ? pending : `${pending}，${live}`)
     this.#pendingFinal = null
     this.#liveInterim = ''
-    // TEMP TRACE (remove after the flush-window verification).
-    console.info('[voice][trace] flush', reason, {
-      sinceLastAsrMs: this.#lastAsrAt === 0 ? -1 : Date.now() - this.#lastAsrAt,
-      pendingChars: pending.length,
-      liveChars: live.length,
-    })
     // The flush timer can outlive a hang-up by a beat; never submit then.
     if (this.status.getSnapshot().mode !== 'loop') return
     if (text === null || text.length < MIN_UTTERANCE_CHARS) return
