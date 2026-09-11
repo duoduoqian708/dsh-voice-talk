@@ -309,12 +309,23 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 
 /* signature element: voice-memos waveform (ink, round-capped bars) */
 .dsh-voice-wave {
+  position: relative;
   flex: 1 1 auto; min-width: 140px; max-width: 400px;
   display: flex; align-items: center; justify-content: space-between;
   gap: 5px; height: 70px; margin: 0;
 }
 /* voice-print lottie fills the slot (slice crops the comp's empty bands) */
-.dsh-voice-wave > svg { width: 100%; height: 100%; }
+.dsh-voice-wave > svg { width: 100%; height: 100%; transition: opacity .15s ease; }
+/* Idle: the paused comp is hidden and a crisp flat rule takes its place. The
+   compressed comp was a faint, uneven "line" (its thickness varies along the
+   path); the rule keeps the wave's own color and an exact 3px height. */
+.dsh-voice-wave[data-idle='true'] > svg { opacity: 0; }
+.dsh-voice-wave::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 3px; margin-top: -1.5px; border-radius: 1.5px;
+  background: #7DD5D9; opacity: 0; transition: opacity .15s ease;
+}
+.dsh-voice-wave[data-idle='true']::after { opacity: 1; }
 .dsh-voice-wave-bar {
   width: 5px; height: 6px; border-radius: 2.5px;
   background: #1D1D1F; opacity: .85;

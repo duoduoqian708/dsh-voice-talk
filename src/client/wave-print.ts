@@ -55,6 +55,9 @@ export class WavePrint {
       rendererSettings: { preserveAspectRatio: 'xMidYMid slice' },
     })
     this.#flipped = this.#style === 'wave' && this.#phaseOf() === 'listening'
+    // The host element survives remounts (style swap): clear any stale idle
+    // flag from the previous print — the first setLevel tick re-decides.
+    this.#setIdle(false)
     this.#applyTransform()
   }
 
@@ -76,26 +79,37 @@ export class WavePrint {
   setLevel(level: number): void {
     const target = level <= 0.05 ? 0 : Math.min(1, level)
     this.#level += (target - this.#level) * (target > this.#level ? 0.4 : 0.18)
-    // Idle must be motionless: once the release envelope has settled, pause
-    // the lottie — squashing an animating comp to 4% used to leave a fast
-    // jitter as the visible "line". Any real level resumes the clock.
-    if (target > 0) {
-      if (!this.#playing) {
-        this.#playing = true
-        this.#anim?.play()
-      }
-    } else if (this.#playing && this.#level < IDLE_SETTLE_LEVEL) {
-      this.#playing = false
-      this.#anim?.pause()
-    }
+    // Idle shows a crisp CSS rule instead of the comp: a squashed animating
+    // lottie was both faint and uneven (its thickness varies along the line).
+    this.#setPlaying(!(target === 0 && this.#level < IDLE_SETTLE_LEVEL))
     this.#applyTransform()
   }
 
-  /** Flip + amplitude on one transform: scaleY compresses toward the comp's
-   *  vertical center, which both presets share — idle is a plain line. */
+  /** Swap between the lottie clock and the flat idle rule. */
+  #setPlaying(playing: boolean): void {
+    if (playing === this.#playing) return
+    this.#playing = playing
+    if (playing) {
+      this.#setIdle(false)
+      this.#anim?.play()
+    } else {
+      this.#anim?.pause()
+      this.#setIdle(true)
+    }
+  }
+
+  /** Idle flag for the stylesheet: hides the comp, reveals the flat rule. */
+  #setIdle(idle: boolean): void {
+    if (idle) this.#host.dataset.idle = 'true'
+    else delete this.#host.dataset.idle
+  }
+
+  /** Flip + amplitude on one transform. Idle leaves the host unscaled — the
+   *  rule must stay its full 3px (squashing it was the faint-line bug). */
   #applyTransform(): void {
-    const s = IDLE_SCALE + this.#level * 1.2
-    const transform = `${this.#flipped ? 'scaleX(-1) ' : ''}scaleY(${s.toFixed(3)})`
+    const transform = this.#playing
+      ? `${this.#flipped ? 'scaleX(-1) ' : ''}scaleY(${(IDLE_SCALE + this.#level * 1.2).toFixed(3)})`
+      : ''
     if (transform === this.#lastTransform) return
     this.#lastTransform = transform
     this.#host.style.transform = transform
