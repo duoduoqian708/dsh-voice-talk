@@ -39,6 +39,9 @@ export interface Config {
   maxReadoutChars?: number
   /** Speaker voice per theme id (themes have disjoint voice namespaces). */
   speakerByTheme?: Record<string, string>
+  /** Default speech rate per theme id (mirrors speakerByTheme; falls back to
+   *  the global `rate` for themes without an entry). */
+  rateByTheme?: Record<string, number>
   /** DashScope realtime TTS model (must be a qwen3-tts-*-realtime series). */
   qwenModel?: string
   /** DashScope realtime WS endpoint (preset ships the official address). */
@@ -69,6 +72,7 @@ export const Config: z<Config> = z.object({
   ttsParams: z.any().default({}),
   maxReadoutChars: z.number().min(0).max(5000).step(50).default(0),
   speakerByTheme: z.any().default({}),
+  rateByTheme: z.any().default({}),
   qwenModel: z.string().default(QWEN_DEFAULT_MODEL),
   qwenEndpoint: z.string().default(QWEN_DEFAULT_ENDPOINT),
   xfyunEndpoint: z.string().default('wss://tts-api.xfyun.cn/v2/tts'),

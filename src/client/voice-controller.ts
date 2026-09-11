@@ -445,9 +445,6 @@ function themeParams(settings: Required<VoiceSettings>): Record<string, unknown>
   }
 }
 
-/** Session-scope overrides the call HUD writes; null = use the defaults. */
-const SESSION_BASE_RATE = 1.0
-
 export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
@@ -504,7 +501,7 @@ export class VoiceController {
   #spokenMarkChars = 0
   /** Bumped per submitted round; a settle from a superseded round is inert. */
   #roundToken = 0
-  /** Session-scoped rate override (null = SESSION_BASE_RATE); survives hang-ups. */
+  /** Session-scoped rate override (null = the theme's stored default); survives hang-ups. */
   #sessionRate: number | null = null
   /** Session-scoped speaker override (null = theme default); survives hang-ups. */
   #sessionSpeaker: string | null = null
@@ -623,8 +620,8 @@ export class VoiceController {
   /**
    * The resolved settings as this session sees them: the stored defaults are
    * the base, with the HUD's session overrides applied on top — the rate
-   * override replaces `rate` outright (base is the constant 1.0, stored
-   * values are never read), and the speaker override is folded into
+   * override replaces the theme's stored default (rateByTheme, falling back
+   * to the global `rate`), and the speaker override is folded into
    * `speakerByTheme[theme]` so every existing read path picks it up.
    * A theme's default speaker fills an unset entry too: without it the
    * readout chain sends an empty voice name and cloud vendors reject the
@@ -642,7 +639,7 @@ export class VoiceController {
     const speaker = this.#sessionSpeaker ?? speakerByTheme[resolved.ttsTheme] ?? ''
     return {
       ...resolved,
-      rate: this.#sessionRate ?? SESSION_BASE_RATE,
+      rate: this.#sessionRate ?? resolved.rateByTheme[resolved.ttsTheme] ?? resolved.rate,
       speakerByTheme: speaker === '' ? speakerByTheme : { ...speakerByTheme, [resolved.ttsTheme]: speaker },
     }
   }

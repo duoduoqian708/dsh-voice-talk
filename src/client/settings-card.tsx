@@ -9,6 +9,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { VoiceSettings } from './voice-settings.ts'
 import { listVoiceThemes, speakersForTheme, voiceThemeOf, type VoiceTheme } from './voice-themes.ts'
 import { VoicePicker } from './voice-picker.tsx'
+import { RateMagnetSlider } from './rate-magnet.tsx'
 import { CloudRecognizer, type AsrVendor } from './asr.ts'
 import type { RecognitionHandle } from './speech.ts'
 
@@ -150,8 +151,9 @@ function maskRef(mask: boolean, value: string): string {
   return `${v.slice(0, 4)}****${v.slice(-4)}`
 }
 
-/** The sentence the try-listen buttons read. */
-const TRY_TEXT = '你好，我是你的语音助手，很高兴为你朗读内容。'
+/** The sentence the try-listen buttons read (covers comma/period/question
+ *  pauses so voice and rate are easy to judge). */
+const TRY_TEXT = '你好，我是你的语音助手。很高兴为你朗读这段试听内容，你可以听听我的音色是否自然、语速是否合适。准备好了吗？'
 
 /** Fixed empty refs list (module constant — a per-render `?? []` churned identity). */
 const EMPTY_REFS: readonly { ref: string; label: string }[] = []
@@ -160,8 +162,6 @@ const EMPTY_REFS: readonly { ref: string; label: string }[] = []
  *  describe() IPC when the settings page is revisited while state is stable.
  *  Cleared by the save flow (onRefresh) so a fresh check follows a write. */
 const configuredCache = new Map<string, boolean>()
-/** Try-listen always reads at the default rate; live speed lives on the HUD. */
-const TRY_RATE = 1.0
 
 /** The try-listen player singleton + generation counter: a newer 试听 stops
  *  the one on the air the moment it is clicked, and an older in-flight fetch
@@ -183,13 +183,13 @@ function stopTryAudio(): void {
 }
 
 /** Try-listen through the one-shot bridge route (cloud themes). */
-function tryCloud(theme: string, voice: string, extra: Record<string, string>, text: string = TRY_TEXT): void {
+function tryCloud(theme: string, voice: string, rate: number, extra: Record<string, string>, text: string = TRY_TEXT): void {
   const seq = ++trySeq
   stopTryAudio()
   void fetch(`/voice-tts/${theme}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice, rate: TRY_RATE, ...extra }),
+    body: JSON.stringify({ text, voice, rate, ...extra }),
   }).then(async response => {
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null
@@ -210,12 +210,12 @@ function tryCloud(theme: string, voice: string, extra: Record<string, string>, t
 }
 
 /** Try-listen for the system theme (speechSynthesis). */
-function trySystem(voiceName: string, lang: string): void {
+function trySystem(voiceName: string, lang: string, rate: number): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
   window.speechSynthesis.cancel()
   const utterance = new SpeechSynthesisUtterance(TRY_TEXT)
   utterance.lang = lang
-  utterance.rate = TRY_RATE
+  utterance.rate = rate
   if (voiceName !== '') {
     const voice = window.speechSynthesis.getVoices().find(v => v.name === voiceName)
     if (voice !== undefined) utterance.voice = voice
@@ -226,8 +226,9 @@ function trySystem(voiceName: string, lang: string): void {
 /** Try-listen for a theme given resolved settings + a speaker override. */
 function tryListen(theme: string, settings: Required<VoiceSettings>, speakerOverride: string): void {
   const voice = speakerOverride || settings.speakerByTheme[theme] || ''
+  const rate = settings.rateByTheme[theme] ?? settings.rate
   if (theme === 'system') {
-    trySystem(voice || settings.voiceName, settings.voiceLang)
+    trySystem(voice || settings.voiceName, settings.voiceLang, rate)
     return
   }
   const extra: Record<string, string> = {}
@@ -236,7 +237,7 @@ function tryListen(theme: string, settings: Required<VoiceSettings>, speakerOver
     extra.endpoint = settings.qwenEndpoint
   }
   if (theme === 'xfyun') extra.endpoint = settings.xfyunEndpoint
-  tryCloud(theme, voice, extra)
+  tryCloud(theme, voice, rate, extra)
 }
 
 /** Theme → endpoint settings field (used to build the modal try-listen). */
@@ -569,6 +570,11 @@ function ProviderModal({
   const [promptDraft, setPromptDraft] = useState(TRY_TEXT)
   const [message, setMessage] = useState<string | null>(null)
   const speakerChanged = speakerDraft !== savedSpeaker
+  // Per-theme default rate, mirroring the speaker: the stored entry for this
+  // theme (falling back to the global rate) is the draft's starting point.
+  const savedRate = value.rateByTheme[theme.id] ?? value.rate
+  const [rateDraft, setRateDraft] = useState(savedRate)
+  const rateChanged = rateDraft !== savedRate
 
   useEffect(() => {
     if (refs.length === 0) return
@@ -621,10 +627,10 @@ function ProviderModal({
 
   const tryIt = (): void => {
     if (theme.id === 'system') {
-      trySystem(speakerDraft || value.voiceName, value.voiceLang)
+      trySystem(speakerDraft || value.voiceName, value.voiceLang, rateDraft)
       return
     }
-    tryCloud(theme.id, speakerDraft, themeExtras(theme.id, {
+    tryCloud(theme.id, speakerDraft, rateDraft, themeExtras(theme.id, {
       ...value,
       qwenModel: fieldDraft.qwenModel ?? value.qwenModel,
       qwenEndpoint: fieldDraft.qwenEndpoint ?? value.qwenEndpoint,
@@ -707,7 +713,23 @@ function ProviderModal({
             >
               设为默认
             </button>
-            <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
+          </span>
+        </label>
+        <label className='dsh-voice-row'>
+          <span className='dsh-voice-row-label'>语速</span>
+          <span className='dsh-voice-cred-cell'>
+            <RateMagnetSlider rate={rateDraft} onChange={setRateDraft} />
+            <button
+              type='button'
+              className='dsh-voice-provider-btn'
+              disabled={!rateChanged}
+              onClick={() => {
+                set('rateByTheme', { ...value.rateByTheme, [theme.id]: rateDraft })
+                setMessage('已设为默认语速')
+              }}
+            >
+              设为默认
+            </button>
           </span>
         </label>
         <label className='dsh-voice-row'>
@@ -718,6 +740,9 @@ function ProviderModal({
             onChange={event => setPromptDraft(event.target.value)}
           />
         </label>
+        <div className='dsh-voice-try-row'>
+          <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
+        </div>
         </>)}
         <div className='dsh-voice-modal-footer'>
           {message !== null && <span className='dsh-voice-setup-ok'>{message}</span>}

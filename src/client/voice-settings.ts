@@ -15,6 +15,8 @@ export interface VoiceSettings {
   maxReadoutChars?: number
   /** Speaker per theme id (themes have disjoint voice-name namespaces). */
   speakerByTheme?: Record<string, string>
+  /** Default speech rate per theme id (falls back to `rate`). */
+  rateByTheme?: Record<string, number>
   /** DashScope realtime TTS model (qwen3-tts-*-realtime series). */
   qwenModel?: string
   /** DashScope realtime WS endpoint. */
@@ -44,6 +46,7 @@ export const VOICE_DEFAULTS: Required<VoiceSettings> = {
   ttsParams: {},
   maxReadoutChars: 0,
   speakerByTheme: {},
+  rateByTheme: {},
   qwenModel: 'qwen3-tts-flash-realtime',
   qwenEndpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
   xfyunEndpoint: 'wss://tts-api.xfyun.cn/v2/tts',
@@ -84,6 +87,7 @@ export function resolveSettings(section: VoiceSettings | undefined): Required<Vo
     ttsParams: value.ttsParams ?? VOICE_DEFAULTS.ttsParams,
     maxReadoutChars: value.maxReadoutChars ?? VOICE_DEFAULTS.maxReadoutChars,
     speakerByTheme: value.speakerByTheme ?? VOICE_DEFAULTS.speakerByTheme,
+    rateByTheme: value.rateByTheme ?? VOICE_DEFAULTS.rateByTheme,
     qwenModel: value.qwenModel ?? VOICE_DEFAULTS.qwenModel,
     qwenEndpoint: value.qwenEndpoint ?? VOICE_DEFAULTS.qwenEndpoint,
     xfyunEndpoint: value.xfyunEndpoint ?? VOICE_DEFAULTS.xfyunEndpoint,
