@@ -293,7 +293,8 @@ body[data-ds-dark-theme] .dsh-voice-avatar-circle {
   box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
 }
 body[data-ds-dark-theme] .dsh-voice-wave-bar { background: #E6EDF7; }
-body[data-ds-dark-theme] .dsh-voice-live-interim { color: #E6EDF7; }
+body[data-ds-dark-theme] .dsh-voice-transcript { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
+body[data-ds-dark-theme] .dsh-voice-transcript-scroll { color: #E6EDF7; scrollbar-color: rgba(255, 255, 255, .25) transparent; }
 body[data-ds-dark-theme] .dsh-voice-live-error { color: #FF6961; }
 body[data-ds-dark-theme] .dsh-voice-skip { color: #6AB8FF; }
 body[data-ds-dark-theme] .dsh-voice-live-warn { color: #FFB020; }
@@ -481,13 +482,34 @@ body[data-ds-dark-theme] .dsh-voice-modal-divider::after { background: var(--dsw
   text-align: center; padding: 0 4px;
 }
 .dsh-voice-live > div {
-  max-height: clamp(44px, 18vh, 132px); overflow-y: auto; width: 100%;
+  max-height: 44px; overflow-y: auto; width: 100%;
   font-size: 15px; line-height: 1.5;
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
 }
-.dsh-voice-live-interim { color: #1D1D1F; }
 .dsh-voice-live-warn { color: #B25000; font-size: 13px; }
 .dsh-voice-live-error { color: #FF3B30; font-size: 13px; }
+
+/* live transcript card: a fixed, pre-reserved display area that only lights
+   up while the user is dictating. Its space stays even when empty, so the
+   hero cluster and the controls never shift; text streams in, overflows
+   scroll, and the newest line is followed until the user scrolls up. */
+.dsh-voice-transcript {
+  box-sizing: border-box;
+  margin-top: 14px;
+  width: min(100%, 620px); height: 90px;
+  border-radius: 16px; padding: 10px 14px;
+  background: rgba(0, 0, 0, .04);
+  border: 1px solid rgba(0, 0, 0, .07);
+  opacity: 0; visibility: hidden;
+  transition: opacity .18s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), visibility .18s;
+}
+.dsh-voice-transcript[data-visible='true'] { opacity: 1; visibility: visible; }
+.dsh-voice-transcript-scroll {
+  height: 100%; overflow-y: auto;
+  font-size: 15px; line-height: 1.5; color: #1D1D1F;
+  text-align: left; white-space: pre-wrap; word-break: break-word;
+  scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
+}
 
 /* ---- controls row: three independent controls (speaker / rate / hang-up) ---- */
 .dsh-voice-controls {
@@ -973,6 +995,7 @@ body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-che
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
   .dsh-voice-duration { margin-top: 12px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
+  .dsh-voice-transcript { height: 78px; margin-top: 10px; }
   .dsh-voice-stream { padding: 20px 14px 24px; }
 }
 
@@ -999,10 +1022,16 @@ body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-che
 }
 `
 
-/** Inject the sheet once per page (idempotent across apply cycles). */
+/** Inject the sheet once per page, refreshing its content when the plugin
+ *  reloads without a full page refresh (upsert: a stale tag would otherwise
+ *  keep old CSS while the new JS runs). */
 export function injectVoiceStyles(): void {
   if (typeof document === 'undefined') return
-  if (document.querySelector('style[data-plugin-css="dsh-voice-talk/styles.css"]') !== null) return
+  const existing = document.querySelector<HTMLStyleElement>('style[data-plugin-css="dsh-voice-talk/styles.css"]')
+  if (existing !== null) {
+    if (existing.textContent !== CSS) existing.textContent = CSS
+    return
+  }
   const tag = document.createElement('style')
   tag.dataset.pluginCss = 'dsh-voice-talk/styles.css'
   tag.textContent = CSS

@@ -275,6 +275,31 @@ const ToolCard = memo(function ToolCard({ name, args, ok, text, running }: {
 })
 
 /**
+ * The live transcript card: a fixed, pre-reserved display area below the hero
+ * that only lights up while recognizable text is streaming. Its space stays
+ * even when empty (the hero and controls never shift); long dictations
+ * scroll, with the newest line followed until the user scrolls up.
+ */
+const LiveTranscript = memo(function LiveTranscript({ text }: { text: string }): ReactElement {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const followRef = useRef(true)
+  useEffect(() => {
+    const el = ref.current
+    if (el !== null && followRef.current) el.scrollTop = el.scrollHeight
+  }, [text])
+  const onScroll = (): void => {
+    const el = ref.current
+    if (el === null) return
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8
+  }
+  return (
+    <div className='dsh-voice-transcript' data-visible={text !== ''}>
+      <div className='dsh-voice-transcript-scroll' ref={ref} onScroll={onScroll}>{text}</div>
+    </div>
+  )
+})
+
+/**
  * One question interaction (the questions-protocol card: ask_user_question
  * and anything else that speaks the same args/result shape). Display-only —
  * the voice loop answers; the card mirrors the ask, then the chosen labels.
@@ -605,10 +630,9 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
           {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 请语音回答</div>}
-          {phase === 'listening' && !micMuted && interim !== '' && (
-            <div className='dsh-voice-live-interim' ref={liveRef} onScroll={onLiveScroll}>{interim}</div>
-          )}
         </div>
+
+        <LiveTranscript text={phase === 'listening' && !micMuted ? interim : ''} />
 
         <div className='dsh-voice-controls'>
           <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} />
