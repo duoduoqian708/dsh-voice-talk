@@ -40,7 +40,15 @@ const FLUSH_MIN_CHARS = 100
 /** Utterance cap: speaking this long without a pause forces a submit. */
 const UTTERANCE_CAP_MS = 60_000
 /** Safety margin on top of the configured pause before a submit. */
-const SILENCE_MARGIN_MS = 300
+const SILENCE_MARGIN_MS = 500
+/**
+ * Voice-hold signals (local level / vendor VAD onset) are currently OFF by
+ * request: submission keys on recognized text alone (the cloud's cadence is
+ * the only clock). The whole plumbing — the worklet RMS, the endpointer, the
+ * machine's level()/speechOnset() — stays in place; flip to true to restore
+ * cut protection for text gaps.
+ */
+const USE_VOICE_HOLD = false
 
 /** The input write path the controller submits through. */
 export interface InputWriteFace {
@@ -679,11 +687,13 @@ export class VoiceController {
         this.#utt.partial(interim)
       },
       onSpeech: () => {
-        if (!this.#machineListening()) return
+        // Voice-hold signals are gated by USE_VOICE_HOLD: submission keys on
+        // text alone right now (the plumbing stays for a one-line restore).
+        if (!USE_VOICE_HOLD || !this.#machineListening()) return
         this.#utt.speechOnset()
       },
       onLevel: rms => {
-        if (!this.#machineListening()) return
+        if (!USE_VOICE_HOLD || !this.#machineListening()) return
         this.#utt.level(rms)
       },
       onLink: up => this.#onLink(up),
