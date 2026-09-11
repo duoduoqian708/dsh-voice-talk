@@ -344,9 +344,11 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const utteranceStartAt = useVoice(s => s.utteranceStartAt)
 
   // Duration of the CURRENT call: reset on every armed loop (hang-up → reopen
-  // starts from 00:00), not the session's total age.
+  // starts from 00:00), not the session's total age. Accrues only while the
+  // call runs: muting banks the live segment and freezes the display.
   const [elapsed, setElapsed] = useState(0)
-  const startedAt = useRef(Date.now())
+  const bankedMs = useRef(0)
+  const runningSince = useRef<number | null>(null)
 
   const [setupMissing, setSetupMissing] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -398,11 +400,30 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   // Call timer, mm:ss — restarted with each armed loop.
   useEffect(() => {
     if (mode !== 'loop') return
-    startedAt.current = Date.now()
+    bankedMs.current = 0
+    runningSince.current = Date.now()
     setElapsed(0)
-    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 500)
+    const id = setInterval(() => {
+      const since = runningSince.current
+      const ms = bankedMs.current + (since === null ? 0 : Date.now() - since)
+      setElapsed(Math.floor(ms / 1000))
+    }, 500)
     return () => clearInterval(id)
   }, [mode])
+
+  // Mute = pause: bank the running segment; unmuting starts a fresh one.
+  useEffect(() => {
+    if (mode !== 'loop') return
+    if (micMuted) {
+      const since = runningSince.current
+      if (since !== null) {
+        bankedMs.current += Date.now() - since
+        runningSince.current = null
+      }
+    } else if (runningSince.current === null) {
+      runningSince.current = Date.now()
+    }
+  }, [micMuted, mode])
 
   // Stream follow + render window. Entry pins to the newest message; follow
   // is direction-based (only a real upward scroll leaves the tail, so content

@@ -5,8 +5,9 @@
 // (the browser's Web Speech recognition is retired).
 //
 // Audio path: getUserMedia → AudioWorklet (inline via Blob URL) downsamples
-// to 16k/16-bit/mono and reports a per-chunk RMS; the main thread applies
-// hysteresis for speech-activity transitions (drives the 60s utterance cap).
+// to 16k/16-bit/mono and posts PCM chunks straight through. No main-thread
+// energy gate here: the 60s utterance cap is opened by the controller on the
+// first recognized text, so raw mic level never drives product behavior.
 // Protocol: binary PCM frames up, JSON events down over /voice-asr/<vendor>
 // (the host bridge normalizes every vendor to that shape).
 //
@@ -24,13 +25,8 @@ export type AsrVendor = 'qwen' | 'xfyun'
 const CHUNK_SAMPLES = 640
 const RECONNECT_BASE_MS = 250
 const RECONNECT_MAX_MS = 4_000
-/** Speech-activity hysteresis on raw float RMS (start above, stop below). */
-const SPEECH_ON_RMS = 0.025
-const SPEECH_OFF_RMS = 0.012
-/** Hold time so one breathy frame cannot flick the activity flag off. */
-const SPEECH_HOLD_MS = 300
 
-/** The worklet: streaming linear resample to 16k + int16 chunking + RMS. */
+/** The worklet: streaming linear resample to 16k + int16 chunking. */
 const WORKLET_SRC = `
 class AsrTap extends AudioWorkletProcessor {
   constructor() {
@@ -39,8 +35,6 @@ class AsrTap extends AudioWorkletProcessor {
     this.pos = 0
     this.last = 0
     this.chunk = []
-    this.rmsSum = 0
-    this.rmsCount = 0
   }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0]
@@ -48,15 +42,11 @@ class AsrTap extends AudioWorkletProcessor {
     const ratio = this.ratio
     let pos = this.pos
     let last = this.last
-    let sum = this.rmsSum
-    let n = this.rmsCount
     while (pos < ch.length) {
       const idx = pos | 0
       const f = pos - idx
       const a = idx === 0 ? last : ch[idx - 1]
       const s = a + (ch[idx] - a) * f
-      sum += s * s
-      n += 1
       this.chunk.push(s)
       pos += ratio
       if (this.chunk.length >= 640) {
@@ -65,17 +55,12 @@ class AsrTap extends AudioWorkletProcessor {
           const v = Math.max(-1, Math.min(1, this.chunk[k]))
           pcm[k] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767)
         }
-        const rms = n > 0 ? Math.sqrt(sum / n) : 0
-        this.port.postMessage({ pcm: pcm.buffer, rms }, [pcm.buffer])
+        this.port.postMessage({ pcm: pcm.buffer }, [pcm.buffer])
         this.chunk = []
-        sum = 0
-        n = 0
       }
     }
     this.pos = pos - ch.length
     this.last = ch[ch.length - 1]
-    this.rmsSum = sum
-    this.rmsCount = n
     return true
   }
 }
@@ -105,8 +90,6 @@ export class CloudRecognizer implements Recognizer {
     const pending: ArrayBuffer[] = []
     let stream: MediaStream | null = null
     let audioCtx: AudioContext | null = null
-    let speechActive = false
-    let speechAt = 0
     // The settings ride hello: the bridge resolves credentials and the model
     // per connection, so a changed 模型 ID lands on the next utterance.
     const hello = JSON.stringify({
@@ -133,19 +116,6 @@ export class CloudRecognizer implements Recognizer {
       stream = null
       void audioCtx?.close().catch(() => { /* already closed */ })
       audioCtx = null
-    }
-
-    /** Hysteresis: fast ON, slow OFF — one breathy frame cannot flick the flag. */
-    const observeRms = (rms: number): void => {
-      const now = Date.now()
-      const active = speechActive
-        ? rms > SPEECH_OFF_RMS || now - speechAt < SPEECH_HOLD_MS
-        : rms > SPEECH_ON_RMS
-      if (active !== speechActive) {
-        speechActive = active
-        if (active) speechAt = now
-        events.onSpeechActive(active)
-      }
     }
 
     const sendChunk = (buffer: ArrayBuffer): void => {
@@ -229,8 +199,7 @@ export class CloudRecognizer implements Recognizer {
         const source = audioCtx.createMediaStreamSource(stream)
         const tap = new AudioWorkletNode(audioCtx, 'asr-tap')
         tap.port.onmessage = (event: MessageEvent): void => {
-          const payload = event.data as { pcm?: ArrayBuffer; rms?: number }
-          if (typeof payload.rms === 'number') observeRms(payload.rms)
+          const payload = event.data as { pcm?: ArrayBuffer }
           if (payload.pcm instanceof ArrayBuffer) sendChunk(payload.pcm)
         }
         source.connect(tap)

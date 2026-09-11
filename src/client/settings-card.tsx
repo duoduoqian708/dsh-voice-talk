@@ -394,7 +394,6 @@ function AsrTestModal({
     handleRef.current = recognizer.start({
       onInterim: setInterim,
       onFinal: text => { setLines(list => [...list, text]); setInterim('') },
-      onSpeechActive: () => { /* the status line stays 监听中 for v1 */ },
       onEnd: () => { /* unexpected drops re-arm inside the recognizer */ },
       onError: (message, fatal) => { if (fatal) setError(message) },
     }, {

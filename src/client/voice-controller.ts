@@ -75,6 +75,11 @@ function partialTextOf(partial: PartialAssistant): string {
     .join('')
 }
 
+/** Non-empty partial text with at least one real (non-punctuation) character. */
+function hasRecognizedText(interim: string): boolean {
+  return /[\p{L}\p{N}]/u.test(interim)
+}
+
 /**
  * Stream-safe cleaner lives in readout.ts now (shared with the karaoke
  * marker); re-exported above for callers that imported it from here.
@@ -533,9 +538,14 @@ export class VoiceController {
     }
     const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
-      onInterim: interim => this.status.patch({ interim: this.#composeInterim(interim) }),
+      onInterim: interim => {
+        this.status.patch({ interim: this.#composeInterim(interim) })
+        // The 60s cap opens on the FIRST recognized text, never on raw mic
+        // energy: wind, keyboards, and room noise must not start the clock —
+        // only text the cloud model actually produced counts as input.
+        if (hasRecognizedText(interim)) this.#openUtteranceWindow()
+      },
       onFinal: text => this.#onFinalUtterance(text),
-      onSpeechActive: active => this.#onSpeechActive(active),
       onEnd: () => { /* the recognizer reconnects itself */ },
       onError: (message, fatal) => {
         if (fatal) {
@@ -564,9 +574,8 @@ export class VoiceController {
     return recognizer
   }
 
-  /** Speech-activity transition: the first onset opens the 60s cap window. */
-  #onSpeechActive(active: boolean): void {
-    if (!active) return
+  /** First recognized text of an utterance opens the 60s cap window. */
+  #openUtteranceWindow(): void {
     const snap = this.status.getSnapshot()
     if (this.#disposed || snap.mode !== 'loop' || snap.micMuted) return
     if (snap.phase !== 'listening' || this.#utteranceStartAt !== null) return

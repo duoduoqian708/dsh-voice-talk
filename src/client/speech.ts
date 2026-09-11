@@ -8,8 +8,6 @@ export interface RecognitionEvents {
   onInterim(text: string): void
   /** A finalized utterance (pause or hard stop ended it). */
   onFinal(text: string): void
-  /** Speech-activity transition from the mic RMS (drives the utterance cap). */
-  onSpeechActive(active: boolean): void
   /** The engine stopped on its own (silence, timeout, error). */
   onEnd(): void
   /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported). */
