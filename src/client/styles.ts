@@ -91,6 +91,7 @@ const CSS = `
 .dsh-voice-provider-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .dsh-voice-provider-btn {
   border: none; border-radius: 10px; padding: 0 14px; height: 34px; font-size: 13px; cursor: pointer;
+  flex: none;
   background: rgba(0, 0, 0, .06); color: #1D1D1F;
   transition: background .15s;
 }
@@ -168,6 +169,7 @@ const CSS = `
   content: ''; flex: 1; height: 1px; background: rgba(0, 0, 0, .1);
 }
 .dsh-voice-modal-footer { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.dsh-voice-modal-footer .dsh-voice-provider-btn { margin-left: auto; }
 .dsh-voice-input-wide { flex: 1; max-width: none; min-width: 0; }
 .dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
 .dsh-voice-modal select.dsh-voice-input { max-width: none; flex: 1; }

@@ -424,8 +424,8 @@ function AsrTestModal({
           {lines.length === 0 && interim === '' && error === null && <p className='dsh-voice-asr-test-waiting'>…</p>}
         </div>
         <div className='dsh-voice-modal-footer'>
-          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
           {error === null && <span className='dsh-voice-setup-ok'>关闭即停止识别</span>}
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
         </div>
       </div>
     </div>
@@ -705,6 +705,7 @@ function ProviderModal({
             >
               设为默认
             </button>
+            <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
           </span>
         </label>
         <label className='dsh-voice-row'>
@@ -715,13 +716,10 @@ function ProviderModal({
             onChange={event => setPromptDraft(event.target.value)}
           />
         </label>
-        <div className='dsh-voice-provider-actions'>
-          <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
-        </div>
         </>)}
         <div className='dsh-voice-modal-footer'>
-          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
           {message !== null && <span className='dsh-voice-setup-ok'>{message}</span>}
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
         </div>
       </div>
     </div>
