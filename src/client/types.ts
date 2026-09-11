@@ -25,8 +25,12 @@ export interface VoiceStatus {
   /** Turn whose readout is playing (karaoke marker target); null when idle. */
   readonly spokenTurn: number | null
   /** Cleaned characters of the spoken turn actually PLAYED, snapped up to a
-   *  sentence boundary (the karaoke mark never runs ahead of the voice). */
+   *  pause boundary (the karaoke range's END). */
   readonly spokenChars: number
+  /** Cleaned characters where the highlighted clause STARTS (the previous
+   *  pause boundary; 0 for the first clause). Only the current clause is
+   *  tinted — what has been read earlier loses the tint. */
+  readonly spokenFrom: number
   /** Speech-start epoch of the current utterance (60s cap UI); null = none. */
   readonly utteranceStartAt: number | null
 }

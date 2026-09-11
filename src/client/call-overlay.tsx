@@ -21,7 +21,7 @@ import { WavePrint } from './wave-print.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
 import { RateMagnetSlider } from './rate-magnet.tsx'
 import { rawPrefixForCleaned } from './readout.ts'
-import { Markdown } from './markdown.tsx'
+import { Markdown, type MarkRange } from './markdown.tsx'
 import { VoicePicker } from './voice-picker.tsx'
 import avatarUrl from './assets/avatar.png'
 
@@ -357,11 +357,11 @@ const QuestionCard = memo(function QuestionCard({ questions, answers, error }: {
 })
 
 /** Segments of one assistant message (or the live streaming bubble).
- *  Text segments render through the markdown engine; the karaoke mark is a
- *  raw offset into the message's JOINED prose (text segments joined with
+ *  Text segments render through the markdown engine; the karaoke range is
+ *  raw offsets into the message's JOINED prose (text segments joined with
  *  '\n\n' — same space `proseOf` builds and the readout counts against), so
  *  it is translated per segment here. */
-function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[]; mark: number }): ReactElement {
+function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[]; mark: MarkRange | null }): ReactElement {
   // Raw position of the NEXT text segment within the joined prose.
   let acc = 0
   return (
@@ -373,8 +373,10 @@ function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[
         if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
         const start = acc
         acc += segment.text.length + 2 // '\n\n' separator consumed by proseOf
-        const cut = mark < 0 ? -1 : Math.max(0, Math.min(mark - start, segment.text.length))
-        return <Markdown key={i} text={segment.text} mark={cut} />
+        const length = segment.text.length
+        const from = mark === null ? 0 : Math.max(0, Math.min(mark.from - start, length))
+        const to = mark === null ? 0 : Math.max(0, Math.min(mark.to - start, length))
+        return <Markdown key={i} text={segment.text} mark={mark === null || to <= from ? null : { from, to }} />
       })}
     </>
   )
@@ -389,7 +391,7 @@ const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }
   role: 'user' | 'assistant'
   text: string
   segments: readonly TranscriptSegment[]
-  mark: number
+  mark: MarkRange | null
 }): ReactElement {
   if (role === 'user') {
     return (
@@ -423,6 +425,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const micMuted = useVoice(s => s.micMuted)
   const spokenTurn = useVoice(s => s.spokenTurn)
   const spokenChars = useVoice(s => s.spokenChars)
+  const spokenFrom = useVoice(s => s.spokenFrom)
   // Hooks stay above the `mode !== 'loop'` early return — a conditional hook
   // crashes the overlay on the loop-on render (mic click looked dead).
   const utteranceStartAt = useVoice(s => s.utteranceStartAt)
@@ -456,14 +459,14 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   const streaming = streamState.streaming
   const runningTools = streamState.runningTools
 
-  // Karaoke marker: raw offset into the turn being read out. The text pieces
+  // Karaoke range: raw offsets into the turn being read out. The text pieces
   // the readout has handed to the engine are cleaned-character slices; map
-  // the played count back onto the rendered raw text.
-  const markOf = (turn: number): number =>
-    spokenTurn === null || spokenTurn !== turn ? -1 : rawPrefixForCleaned(
-      messages.find(m => m.turn === turn && m.role === 'assistant')?.text ?? '',
-      spokenChars,
-    )
+  // both ends (clause start / clause end) back onto the rendered raw text.
+  const markOf = (turn: number): MarkRange | null => {
+    if (spokenTurn === null || spokenTurn !== turn) return null
+    const raw = messages.find(m => m.turn === turn && m.role === 'assistant')?.text ?? ''
+    return { from: rawPrefixForCleaned(raw, spokenFrom), to: rawPrefixForCleaned(raw, spokenChars) }
+  }
 
   // Theme setup check: a cloud theme that still needs credentials surfaces a
   // caption instead of a confusing synth error mid-round.
@@ -515,8 +518,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   // most a slice of the transcript mounted.
   const streamRef = useRef<HTMLDivElement | null>(null)
   const followRef = useRef(true)
-  const liveRef = useRef<HTMLDivElement | null>(null)
-  const liveFollowRef = useRef(true)
   const [following, setFollowing] = useState(true)
   const [windowStart, setWindowStart] = useState<number | null>(null)
   const lastTopRef = useRef(0)
@@ -560,20 +561,6 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
     anchorRef.current = null
     el.scrollTop = anchor.top + (el.scrollHeight - anchor.height)
   }, [start])
-
-  // Live transcript follow: keep the newest line in view while text streams
-  // (a long dictation outgrows the box); scrolling up pauses the follow until
-  // the user returns to the bottom.
-  useEffect(() => {
-    const el = liveRef.current
-    if (el !== null && liveFollowRef.current) el.scrollTop = el.scrollHeight
-  }, [interim])
-
-  const onLiveScroll = (): void => {
-    const el = liveRef.current
-    if (el === null) return
-    liveFollowRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8
-  }
 
   const onStreamScroll = (): void => {
     const el = streamRef.current
@@ -672,7 +659,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
               role={m.role}
               text={m.text}
               segments={m.segments}
-              mark={m.role === 'assistant' ? markOf(m.turn) : -1}
+              mark={m.role === 'assistant' ? markOf(m.turn) : null}
             />
           ))}
           {/* Live partial shows whenever it streams — a multi-step turn keeps

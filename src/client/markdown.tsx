@@ -3,11 +3,14 @@
 // this mirrors the common blocks — headings, fenced/inline code, lists,
 // blockquotes, tables, emphasis, links — closely enough to read naturally in
 // a speech call. It stays raw-text oriented: every block/item/cell carries
-// its raw span, and the karaoke marker (a raw character offset into the
-// message) cuts rendered text at exactly the point the readout has reached.
+// its raw span, and the karaoke marker (a raw character range into the
+// message) tints exactly the clause being read.
 
 import { useMemo } from 'react'
 import type { ReactElement } from 'react'
+
+/** A karaoke range in a message's raw prose (both ends are raw offsets). */
+export type MarkRange = { readonly from: number; readonly to: number }
 
 /* ---- inline tokens --------------------------------------------------------- */
 
@@ -108,17 +111,20 @@ function renderInline(raw: string): ReactElement {
 }
 
 /**
- * Render inline content with a karaoke cut: `cut` is a raw-character offset
- * into `raw` (clamped by the caller); the read prefix is wrapped in the
- * highlight. `cut <= 0` and `cut >= raw.length` are the degenerate cases.
+ * Render inline content with a karaoke range: `from`/`to` are raw-character
+ * offsets into `raw` (clamped by the caller); only the slice between them is
+ * tinted — what was read earlier loses the tint. Degenerate ranges fall
+ * through to plain rendering.
  */
-function MarkedRegion({ raw, cut }: { raw: string; cut: number }): ReactElement {
-  if (cut <= 0) return <>{renderInline(raw)}</>
-  if (cut >= raw.length) return <span className='dsh-voice-marked'>{renderInline(raw)}</span>
+function MarkedRegion({ raw, from, to }: { raw: string; from: number; to: number }): ReactElement {
+  const start = Math.max(0, Math.min(from, raw.length))
+  const end = Math.max(0, Math.min(to, raw.length))
+  if (end <= start) return <>{renderInline(raw)}</>
   return (
     <>
-      <span className='dsh-voice-marked'>{renderInline(raw.slice(0, cut))}</span>
-      {renderInline(raw.slice(cut))}
+      {start > 0 && renderInline(raw.slice(0, start))}
+      <span className='dsh-voice-marked'>{renderInline(raw.slice(start, end))}</span>
+      {end < raw.length && renderInline(raw.slice(end))}
     </>
   )
 }
@@ -309,26 +315,33 @@ export function parseBlocks(text: string): MarkdownBlock[] {
   return blocks
 }
 
-/** Clamp a message-level mark into `[0, span]` relative to `contentStart`. */
-function cutWithin(contentStart: number, contentEnd: number, mark: number): number {
-  return Math.max(0, Math.min(mark - contentStart, contentEnd - contentStart))
+/** Clamp a message-level range into `[0, span]` relative to `contentStart`. */
+function rangeWithin(contentStart: number, contentEnd: number, mark: MarkRange | null): MarkRange {
+  if (mark === null) return { from: 0, to: 0 }
+  const span = contentEnd - contentStart
+  return {
+    from: Math.max(0, Math.min(mark.from - contentStart, span)),
+    to: Math.max(0, Math.min(mark.to - contentStart, span)),
+  }
 }
 
 /** Approximate a table cell's raw span: `| a | b |` ≈ cell + ' | ' padding. */
-function tableCellCut(row: TableRow, cellIndex: number, mark: number): number {
+function tableCellRange(row: TableRow, cellIndex: number, mark: MarkRange | null): MarkRange {
   let acc = 0
   for (let k = 0; k < cellIndex && k < row.cells.length; k++) acc += row.cells[k]!.length + 3
-  return cutWithin(row.contentStart + 1 + acc, row.cells[cellIndex]!.length, mark)
+  const start = row.contentStart + 1 + acc
+  return rangeWithin(start, start + row.cells[cellIndex]!.length, mark)
 }
 
 const HEADING_TAGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const
 
 /**
- * Render a raw markdown run as blocks. `mark` is a raw character offset into
- * `text` (or -1 for no highlight); the read prefix of every text-bearing
- * block is tinted. Code blocks are never tinted — the readout skips them.
+ * Render a raw markdown run as blocks. `mark` is a raw character range into
+ * `text` (or null for no highlight); every text-bearing block tints the part
+ * of the range it owns. Code blocks are never tinted — the readout skips
+ * them.
  */
-export function Markdown({ text, mark }: { text: string; mark: number }): ReactElement {
+export function Markdown({ text, mark }: { text: string; mark: MarkRange | null }): ReactElement {
   const blocks = useMemo(() => parseBlocks(text), [text])
   return (
     <>
@@ -340,26 +353,26 @@ export function Markdown({ text, mark }: { text: string; mark: number }): ReactE
             return <hr key={bi} className='dsh-voice-hr' />
           case 'heading': {
             const Tag = HEADING_TAGS[(block.headingLevel ?? 2) - 1] ?? 'h3'
-            const cut = mark < 0 ? -1 : cutWithin(block.contentStart!, block.end, mark)
+            const range = rangeWithin(block.contentStart!, block.end, mark)
             return (
               <Tag key={bi} className='dsh-voice-heading'>
-                <MarkedRegion raw={block.text!} cut={cut} />
+                <MarkedRegion raw={block.text!} from={range.from} to={range.to} />
               </Tag>
             )
           }
           case 'para': {
-            const cut = mark < 0 ? -1 : cutWithin(block.contentStart!, block.end, mark)
+            const range = rangeWithin(block.contentStart!, block.end, mark)
             return (
               <p key={bi} className='dsh-voice-prose'>
-                <MarkedRegion raw={block.text!} cut={cut} />
+                <MarkedRegion raw={block.text!} from={range.from} to={range.to} />
               </p>
             )
           }
           case 'quote': {
-            const cut = mark < 0 ? -1 : cutWithin(block.contentStart!, block.end, mark)
+            const range = rangeWithin(block.contentStart!, block.end, mark)
             return (
               <blockquote key={bi} className='dsh-voice-quote'>
-                <MarkedRegion raw={block.text!} cut={cut} />
+                <MarkedRegion raw={block.text!} from={range.from} to={range.to} />
               </blockquote>
             )
           }
@@ -368,10 +381,10 @@ export function Markdown({ text, mark }: { text: string; mark: number }): ReactE
             return (
               <Tag key={bi} className='dsh-voice-list'>
                 {block.items!.map((item, ii) => {
-                  const cut = mark < 0 ? -1 : cutWithin(item.contentStart, item.end, mark)
+                  const range = rangeWithin(item.contentStart, item.end, mark)
                   return (
                     <li key={ii}>
-                      <MarkedRegion raw={item.text} cut={cut} />
+                      <MarkedRegion raw={item.text} from={range.from} to={range.to} />
                     </li>
                   )
                 })}
@@ -398,10 +411,10 @@ export function Markdown({ text, mark }: { text: string; mark: number }): ReactE
                       {body.map((row, ri) => (
                         <tr key={ri}>
                           {row.cells.map((cell, ci) => {
-                            const cut = mark < 0 ? -1 : tableCellCut(row, ci, mark)
+                            const range = tableCellRange(row, ci, mark)
                             return (
                               <td key={ci}>
-                                <MarkedRegion raw={cell} cut={cut} />
+                                <MarkedRegion raw={cell} from={range.from} to={range.to} />
                               </td>
                             )
                           })}

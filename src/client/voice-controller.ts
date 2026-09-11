@@ -90,6 +90,15 @@ export function lastSentenceBoundary(text: string): number | null {
   return last
 }
 
+/**
+ * Pause marks that end a karaoke clause: Chinese pause punctuation, dashes,
+ * and the western marks. An ASCII period only counts when it is followed by
+ * whitespace/end (a decimal, version or domain never splits), so `.` behaves
+ * in English without chopping `3.14` / `v1.0` / `example.com`. Both scripts
+ * are covered because the conversation may run in either language.
+ */
+const CLAUSE_PAUSE = /[，、；：。！？…—–,;:!?]|(?<!\d)\.(?=\s|$)/g
+
 /** Collect finalized assistant messages from a snapshot (legacy slice). */
 export function assistantMessagesOf(snapshot: ConversationSnapshot): readonly AssistantMessageRef[] {
   const messages: AssistantMessageRef[] = []
@@ -434,7 +443,7 @@ const SESSION_BASE_RATE = 1.0
 export class VoiceController {
   readonly status = new SnapshotStore<VoiceStatus>({
     mode: 'off', phase: 'idle', interim: '', caption: '', lastPrompt: '',
-    pendingCount: 0, error: null, micMuted: false, spokenTurn: null, spokenChars: 0,
+    pendingCount: 0, error: null, micMuted: false, spokenTurn: null, spokenChars: 0, spokenFrom: 0,
     utteranceStartAt: null,
   })
 
@@ -566,7 +575,7 @@ export class VoiceController {
   /** Leave any voice activity: stop everything and go idle (pure off switch). */
   stopVoice(): void {
     this.#disarmAll()
-    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', micMuted: false, spokenTurn: null, spokenChars: 0, utteranceStartAt: null })
+    this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', micMuted: false, spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null })
   }
 
   /**
@@ -1163,11 +1172,13 @@ export class VoiceController {
     const piece = pending.slice(0, take)
     this.#streamFed += take
     this.#spokenText = (this.#spokenText ?? '') + piece
-    // Book-keep where every sentence ends in the cumulative pushed text: the
-    // karaoke mark snaps onto these offsets, so it only ever stops at
-    // punctuation and never runs past what the speaker has actually reached.
+    // Book-keep where every pause boundary sits in the cumulative pushed
+    // text: the karaoke range snaps onto these offsets, so it only ever
+    // advances clause by clause and never runs past what the speaker has
+    // actually reached. Clauses split at common pause punctuation (both
+    // scripts) — a sentence with many commas highlights comma by comma.
     const base = this.#spokenPushedChars
-    for (const match of piece.matchAll(/[。！？；.!?]/g)) {
+    for (const match of piece.matchAll(CLAUSE_PAUSE)) {
       this.#spokenSentenceEnds.push(base + (match.index ?? 0) + 1)
     }
     this.#spokenPushedChars = base + piece.length
@@ -1239,28 +1250,30 @@ export class VoiceController {
     this.#spokenPushedChars = 0
     this.#spokenSentenceEnds.length = 0
     this.#spokenMarkChars = 0
-    this.status.patch({ spokenTurn: null, spokenChars: 0 })
+    this.status.patch({ spokenTurn: null, spokenChars: 0, spokenFrom: 0 })
   }
 
   /**
    * Speaker-reported playback position (cleaned chars, best effort) → the
-   * karaoke mark: snap UP to the next sentence end, so the tint covers the
-   * sentence being read and always stops at punctuation (never mid-sentence,
-   * never past the pushed text). Change-gated and monotone within a round:
-   * one status write per sentence, regardless of how often the engine ticks.
+   * karaoke range: snap UP to the next pause boundary, so only the clause
+   * being read right now is tinted (from the previous boundary to this one);
+   * everything read earlier loses the tint. Change-gated and monotone within
+   * a round: one status write per clause, however often the engine ticks.
    */
   #applySpokenProgress(chars: number): void {
     const ends = this.#spokenSentenceEnds
     let snapped = ends.length === 0 ? 0 : ends[ends.length - 1]!
-    for (const end of ends) {
-      if (end >= chars) {
-        snapped = end
+    let from = ends.length >= 2 ? ends[ends.length - 2]! : 0
+    for (let i = 0; i < ends.length; i++) {
+      if (ends[i]! >= chars) {
+        snapped = ends[i]!
+        from = i > 0 ? ends[i - 1]! : 0
         break
       }
     }
     if (snapped <= this.#spokenMarkChars) return
     this.#spokenMarkChars = snapped
-    this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: snapped })
+    this.status.patch({ spokenTurn: this.#spokenTurnId, spokenChars: snapped, spokenFrom: from })
   }
 
   /** Open (or reuse) the synthesis session for the upcoming sentences. */
@@ -1300,7 +1313,7 @@ export class VoiceController {
     if (mode !== 'loop') {
       this.#recognitionHandle?.stop()
       this.#recognitionHandle = null
-      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', spokenTurn: null, spokenChars: 0, utteranceStartAt: null })
+      this.status.patch({ mode: 'off', phase: 'idle', interim: '', caption: '', spokenTurn: null, spokenChars: 0, spokenFrom: 0, utteranceStartAt: null })
       return
     }
     // Cooldown: let the speaker tail decay, then listen again. The tail of
@@ -1322,7 +1335,7 @@ export class VoiceController {
       this.#armListening()
     }, REARM_COOLDOWN_MS)
     // The round's readout is over: drop the karaoke marker.
-    this.status.patch({ spokenTurn: null, spokenChars: 0 })
+    this.status.patch({ spokenTurn: null, spokenChars: 0, spokenFrom: 0 })
   }
 
   // ---- helpers -------------------------------------------------------------
