@@ -16,6 +16,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExt
 import type { ReactElement } from 'react'
 import type { QuestionAnswerView, QuestionItemView, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
+import { QUESTION_CANCELLED, QUESTION_UNANSWERED, type VoiceKey, type VoiceTranslate } from './locales.ts'
 import { CallBreath } from './voice-wave.ts'
 import { WavePrint } from './wave-print.ts'
 import { speakersForTheme, voiceThemeOf } from './voice-themes.ts'
@@ -47,13 +48,16 @@ export interface CallOverlayProps {
   setField(field: string, value: unknown): void
   /** Live resolved settings (rate/voiceName read here per render). */
   settings: () => { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
+  /** Namespace-bound translator (the framework locale seat). */
+  t: VoiceTranslate
 }
 
-const PHASE_WORD: Record<VoiceStatus['phase'], string> = {
-  idle: '待命',
-  listening: '聆听中',
-  thinking: '思考中',
-  speaking: '播报中',
+/** Dictionary keys of the phase words (translated per render). */
+const PHASE_KEY: Record<VoiceStatus['phase'], VoiceKey> = {
+  idle: 'phase.idle',
+  listening: 'phase.listening',
+  thinking: 'phase.thinking',
+  speaking: 'phase.speaking',
 }
 
 /** Utterance cap (mirrors the controller): the window forced out at this age. */
@@ -99,7 +103,7 @@ function MicRing({ startAt }: { startAt: number | null }): ReactElement | null {
 }
 
 /** The cap's last ten seconds: one number popping each second, then silence. */
-function ListenCountdown({ startAt, visible }: { startAt: number | null; visible: boolean }): ReactElement | null {
+function ListenCountdown({ startAt, visible, t }: { startAt: number | null; visible: boolean; t: VoiceTranslate }): ReactElement | null {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (startAt === null) return
@@ -112,7 +116,7 @@ function ListenCountdown({ startAt, visible }: { startAt: number | null; visible
   if (remaining > COUNTDOWN_VISIBLE_MS) return null
   const sec = Math.max(1, Math.ceil(remaining / 1000))
   return (
-    <div className='dsh-voice-countdown' role='timer' aria-label='说话限时倒计时'>
+    <div className='dsh-voice-countdown' role='timer' aria-label={t('countdown.aria')}>
       <span key={sec} className='dsh-voice-countdown-num'>{sec}</span>
     </div>
   )
@@ -160,7 +164,7 @@ function PhoneGlyph(): ReactElement {
  * The wave slot itself is owned by the settings' voice-print: a lottie
  * preset ('equalizer' | 'wave') or the legacy mic-reactive bars fallback.
  */
-function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt }: { useVoice: VoiceSelectorHook; toggleMute(): void; phase: VoiceStatus['phase']; muted: boolean; waveStyle: string; utteranceStartAt: number | null }): ReactElement {
+function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt, t }: { useVoice: VoiceSelectorHook; toggleMute(): void; phase: VoiceStatus['phase']; muted: boolean; waveStyle: string; utteranceStartAt: number | null; t: VoiceTranslate }): ReactElement {
   const breathRef = useRef<CallBreath | null>(null)
   const printRef = useRef<WavePrint | null>(null)
   const whaleRef = useRef<HTMLDivElement | null>(null)
@@ -222,8 +226,8 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt 
           data-muted={muted}
           ref={keyRef}
           onClick={toggleMute}
-          title={muted ? '取消静音（恢复收录）' : '静音麦克风（不收录声音，不挂断）'}
-          aria-label='静音麦克风'
+          title={muted ? t('hero.unmuteTitle') : t('hero.muteTitle')}
+          aria-label={t('hero.muteAria')}
           aria-pressed={muted}
         >
           <MicGlyph off={muted} />
@@ -234,14 +238,14 @@ function Hero({ useVoice, toggleMute, phase, muted, waveStyle, utteranceStartAt 
 }
 
 /** Collapsible reasoning block (the native stream's "thinking" section). */
-const ReasoningSection = memo(function ReasoningSection({ text }: { text: string }): ReactElement {
+const ReasoningSection = memo(function ReasoningSection({ text, t }: { text: string; t: VoiceTranslate }): ReactElement {
   const [open, setOpen] = useState(false)
   return (
     <div className='dsh-voice-reasoning' data-open={open}>
       <button type='button' className='dsh-voice-reasoning-head' onClick={() => setOpen(o => !o)}>
         <i aria-hidden='true' />
-        已深度思考
-        <span className='dsh-voice-reasoning-toggle'>{open ? '收起' : '展开'}</span>
+        {t('reasoning.done')}
+        <span className='dsh-voice-reasoning-toggle'>{open ? t('common.collapse') : t('common.expand')}</span>
       </button>
       {open && <p className='dsh-voice-reasoning-body'>{text}</p>}
     </div>
@@ -249,12 +253,13 @@ const ReasoningSection = memo(function ReasoningSection({ text }: { text: string
 })
 
 /** One tool card: call head (+args, expandable) or its settled result. */
-const ToolCard = memo(function ToolCard({ name, args, ok, text, running }: {
+const ToolCard = memo(function ToolCard({ name, args, ok, text, running, t }: {
   name: string
   args?: string
   ok?: boolean
   text?: string
   running?: boolean
+  t: VoiceTranslate
 }): ReactElement {
   const [open, setOpen] = useState(false)
   const argsPreview = (args ?? '').split('\n')[0]?.slice(0, 90) ?? ''
@@ -267,7 +272,7 @@ const ToolCard = memo(function ToolCard({ name, args, ok, text, running }: {
         </span>
         <span className='dsh-voice-tool-name'>{name}</span>
         {argsPreview !== '' && <code className='dsh-voice-tool-args'>{argsPreview}</code>}
-        {detail !== '' && <span className='dsh-voice-tool-toggle'>{open ? '收起' : '展开'}</span>}
+        {detail !== '' && <span className='dsh-voice-tool-toggle'>{open ? t('common.collapse') : t('common.expand')}</span>}
       </button>
       {open && detail !== '' && <pre className='dsh-voice-tool-body'>{detail}</pre>}
     </div>
@@ -305,17 +310,21 @@ const LiveTranscript = memo(function LiveTranscript({ text }: { text: string }):
  * the voice loop answers; the card mirrors the ask, then the chosen labels.
  * Unsettled asks read as pending; an unparsable/error result reads as a note.
  */
-const QuestionCard = memo(function QuestionCard({ questions, answers, error }: {
+const QuestionCard = memo(function QuestionCard({ questions, answers, error, t }: {
   questions: readonly QuestionItemView[]
   answers: readonly QuestionAnswerView[] | null
   error: string
+  t: VoiceTranslate
 }): ReactElement {
+  const errorLabel = error === QUESTION_CANCELLED
+    ? t('question.cancelled')
+    : error === QUESTION_UNANSWERED ? t('question.unanswered') : error
   return (
     <div className='dsh-voice-question' data-settled={answers !== null || error !== ''}>
       <div className='dsh-voice-question-head'>
-        <span className='dsh-voice-question-badge'>需要你的回答</span>
-        {answers === null && error === '' && <span className='dsh-voice-question-wait'>等待回答…</span>}
-        {error !== '' && <span className='dsh-voice-question-error'>{error}</span>}
+        <span className='dsh-voice-question-badge'>{t('question.badge')}</span>
+        {answers === null && error === '' && <span className='dsh-voice-question-wait'>{t('question.waiting')}</span>}
+        {error !== '' && <span className='dsh-voice-question-error'>{errorLabel}</span>}
       </div>
       {questions.map((question, qi) => {
         const answer = answers?.find(item => item.id === question.id)
@@ -340,13 +349,13 @@ const QuestionCard = memo(function QuestionCard({ questions, answers, error }: {
                   })}
                 </ul>
               )
-              : <div className='dsh-voice-question-free'>{question.multiSelect ? '可多选' : '自由回答'}</div>}
+              : <div className='dsh-voice-question-free'>{question.multiSelect ? t('question.multi') : t('question.free')}</div>}
             {answer !== undefined && (
               <div className='dsh-voice-question-picked'>
-                {chosen.length > 0 && `已选择：${chosen.join('、')}`}
-                {chosen.length > 0 && answer.custom !== '' && '；'}
-                {answer.custom !== '' && `已输入：${answer.custom}`}
-                {chosen.length === 0 && answer.custom === '' && '已跳过'}
+                {chosen.length > 0 && t('question.selected', { list: chosen.join(t('question.listSep')) })}
+                {chosen.length > 0 && answer.custom !== '' && t('question.sep')}
+                {answer.custom !== '' && t('question.typed', { text: answer.custom })}
+                {chosen.length === 0 && answer.custom === '' && t('question.skipped')}
               </div>
             )}
           </div>
@@ -361,16 +370,16 @@ const QuestionCard = memo(function QuestionCard({ questions, answers, error }: {
  *  raw offsets into the message's JOINED prose (text segments joined with
  *  '\n\n' — same space `proseOf` builds and the readout counts against), so
  *  it is translated per segment here. */
-function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[]; mark: MarkRange | null }): ReactElement {
+function SegmentList({ segments, mark, t }: { segments: readonly TranscriptSegment[]; mark: MarkRange | null; t: VoiceTranslate }): ReactElement {
   // Raw position of the NEXT text segment within the joined prose.
   let acc = 0
   return (
     <>
       {segments.map((segment, i) => {
-        if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
-        if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} />
-        if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} />
-        if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
+        if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} t={t} />
+        if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} t={t} />
+        if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} t={t} />
+        if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} t={t} />
         const start = acc
         acc += segment.text.length + 2 // '\n\n' separator consumed by proseOf
         const length = segment.text.length
@@ -387,11 +396,12 @@ function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[
  * the transcript store reuses message objects while unchanged, so a
  * streaming tick re-renders only the live bubble, not the whole history.
  */
-const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }: {
+const StreamMessage = memo(function StreamMessage({ role, text, segments, mark, t }: {
   role: 'user' | 'assistant'
   text: string
   segments: readonly TranscriptSegment[]
   mark: MarkRange | null
+  t: VoiceTranslate
 }): ReactElement {
   if (role === 'user') {
     return (
@@ -406,7 +416,7 @@ const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }
       <div className='dsh-voice-msg-body'>
         {segments.length === 0
           ? <span className='dsh-voice-msg-empty'>…</span>
-          : <SegmentList segments={segments} mark={mark} />}
+          : <SegmentList segments={segments} mark={mark} t={t} />}
       </div>
     </div>
   )
@@ -415,7 +425,7 @@ const StreamMessage = memo(function StreamMessage({ role, text, segments, mark }
 /**
  * The full-screen call stage, rendered only while the loop is armed.
  */
-export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings }: CallOverlayProps): ReactElement | null {
+export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpeaking, setRateOverride, setVoiceOverride, setField, settings, t }: CallOverlayProps): ReactElement | null {
   const mode = useVoice(s => s.mode)
   const active = mode === 'loop'
   const phase = useVoice(s => s.phase)
@@ -597,41 +607,41 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
     <div className={`dsh-voice-call${collapsed ? ' is-collapsed' : ''}`} data-phase={phase}>
       <aside className='dsh-voice-left'>
         <div className='dsh-voice-duration'>{mm}:{ss}</div>
-        <ListenCountdown startAt={phase === 'listening' && !micMuted ? utteranceStartAt : null} visible={phase === 'listening' && !micMuted} />
+        <ListenCountdown startAt={phase === 'listening' && !micMuted ? utteranceStartAt : null} visible={phase === 'listening' && !micMuted} t={t} />
 
-        <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} utteranceStartAt={utteranceStartAt} />
+        <Hero useVoice={useVoice} toggleMute={toggleMute} phase={phase} muted={micMuted} waveStyle={waveStyle} utteranceStartAt={utteranceStartAt} t={t} />
 
         <div className='dsh-voice-state-word' style={mutedIdle ? { visibility: 'hidden' } : undefined} aria-hidden={mutedIdle || undefined}>
-          <span>{PHASE_WORD[phase]}</span>
+          <span>{t(PHASE_KEY[phase])}</span>
           <button
             type='button'
             className='dsh-voice-skip'
             data-visible={phase === 'speaking'}
             onClick={stopSpeaking}
           >
-            跳过播报
+            {t('hud.skip')}
           </button>
         </div>
 
         <div className='dsh-voice-live' aria-live='polite'>
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
-          {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
-          {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 请语音回答</div>}
+          {setupMissing && <div className='dsh-voice-live-warn'>{t('hud.setupMissing')}</div>}
+          {pendingCount > 0 && <div className='dsh-voice-live-warn'>{t('hud.pending', { count: pendingCount })}</div>}
         </div>
 
         <LiveTranscript text={phase === 'listening' && !micMuted ? interim : ''} />
 
         <div className='dsh-voice-controls'>
-          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} />
-          <div className='dsh-voice-rate-control' title='语速（仅本会话）'>
-            <RateMagnetSlider rate={rate} onChange={setRateOverride} />
+          <SpeakerPicker settings={settings} setVoiceOverride={setVoiceOverride} phase={phase} t={t} />
+          <div className='dsh-voice-rate-control' title={t('hud.rateTitle')}>
+            <RateMagnetSlider rate={rate} onChange={setRateOverride} t={t} />
           </div>
           <button
             type='button'
             className='dsh-voice-hangup-ctl'
             onClick={hangUp}
-            title='结束语音对话（Esc）'
-            aria-label='结束语音对话'
+            title={t('hud.hangupTitle')}
+            aria-label={t('hud.hangupAria')}
           >
             <PhoneGlyph />
           </button>
@@ -642,8 +652,8 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         <button
           type='button'
           className='dsh-voice-collapse'
-          title={collapsed ? '展开信息流' : '收起信息流'}
-          aria-label='收起或展开信息流'
+          title={collapsed ? t('hud.expandStream') : t('hud.collapseStream')}
+          aria-label={t('hud.toggleStreamAria')}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed(c => !c)}
         >
@@ -651,7 +661,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
         </button>
       </aside>
 
-      <section className='dsh-voice-right' aria-label='会话内容'>
+      <section className='dsh-voice-right' aria-label={t('hud.streamAria')}>
         <div className='dsh-voice-stream' ref={streamRef} onScroll={onStreamScroll}>
           {visible.map(m => (
             <StreamMessage
@@ -660,6 +670,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
               text={m.text}
               segments={m.segments}
               mark={m.role === 'assistant' ? markOf(m.turn) : null}
+              t={t}
             />
           ))}
           {/* Live partial shows whenever it streams — a multi-step turn keeps
@@ -669,10 +680,10 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
               <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
               <div className='dsh-voice-msg-body'>
                 {streaming.map((segment, i) => {
-                  if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
-                  if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} />
-                  if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} running />
-                  if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
+                  if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} t={t} />
+                  if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} t={t} />
+                  if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} running t={t} />
+                  if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} t={t} />
                   // The caret rides the last live text run (streaming markdown
                   // is never fully formed mid-generation; render it raw).
                   const last = i === streaming.length - 1
@@ -688,10 +699,10 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
           {phase === 'thinking' && streaming.length === 0 && (
             <div className='dsh-voice-msg dsh-voice-msg-ai dsh-voice-typing-row'>
               <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
-              <div className='dsh-voice-typing' aria-label='正在生成'>
+              <div className='dsh-voice-typing' aria-label={t('hud.typingAria')}>
                 <i /><i /><i />
                 {runningTools.length > 0 && (
-                  <span className='dsh-voice-typing-label'>正在调用 {runningTools.join(' · ')}</span>
+                  <span className='dsh-voice-typing-label'>{t('hud.callingTools', { tools: runningTools.join(' · ') })}</span>
                 )}
               </div>
             </div>
@@ -700,7 +711,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
             <div className='dsh-voice-msg dsh-voice-msg-ai dsh-voice-running-row'>
               <img className='dsh-voice-msg-avatar' src={avatarUrl} alt='' draggable={false} />
               <div className='dsh-voice-msg-body'>
-                {runningTools.map(name => <ToolCard key={name} name={name} running />)}
+                {runningTools.map(name => <ToolCard key={name} name={name} running t={t} />)}
               </div>
             </div>
           )}
@@ -710,8 +721,8 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
             type='button'
             className='dsh-voice-jump'
             onClick={jumpToLatest}
-            title='回到最新'
-            aria-label='回到最新消息'
+            title={t('hud.jumpTitle')}
+            aria-label={t('hud.jumpAria')}
           >
             <i />
           </button>
@@ -730,7 +741,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
  * The dropdown itself is the shared VoicePicker (same component the settings
  * provider modal uses).
  */
-function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase'] }): ReactElement {
+function SpeakerPicker({ settings, setVoiceOverride, phase, t }: { settings: () => { voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string> }; setVoiceOverride(voice: string): void; phase: VoiceStatus['phase']; t: VoiceTranslate }): ReactElement {
   const theme = settings().ttsTheme
   // A stored '' (the retired 主题默认 option) reads as the theme default.
   const storedSpeaker = settings().speakerByTheme[theme]
@@ -743,8 +754,9 @@ function SpeakerPicker({ settings, setVoiceOverride, phase }: { settings: () => 
       value={current}
       defaultId={voiceThemeOf(theme)?.defaultSpeaker ?? ''}
       locked={phase === 'thinking' || phase === 'speaking'}
-      lockHint='本轮回复播完后可切换'
-      ariaLabel='说话人'
+      lockHint={t('picker.lockHint')}
+      t={t}
+      ariaLabel={t('picker.speakerAria')}
       onChange={setVoiceOverride}
     />
   )

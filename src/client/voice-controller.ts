@@ -24,6 +24,7 @@ import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
 import { UtteranceMachine } from './utterance.ts'
 import type { QuestionAnswerView, QuestionItemView, QuestionOptionView, TranscriptMessage, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
+import { errorText, bridgeErrorKey, QUESTION_CANCELLED, QUESTION_UNANSWERED, type VoiceTranslate } from './locales.ts'
 
 /** Shortest finalized utterance worth submitting (filters breaths and noise). */
 const MIN_UTTERANCE_CHARS = 2
@@ -68,6 +69,8 @@ export interface VoiceControllerDeps {
   subscribeSnapshot(listener: () => void): () => void
   /** Resolved voice settings (re-read on every use; the apply layer merges). */
   settings(): VoiceSettings
+  /** Namespace-bound translator (reads the active locale at call time). */
+  t: VoiceTranslate
 }
 
 /** One finalized assistant message relevant to the readout chain. */
@@ -403,7 +406,7 @@ export function transcriptOf(snapshot: ConversationSnapshot, prev?: TranscriptSt
           const segment = last.segments[at] as Extract<TranscriptSegment, { kind: 'question' }>
           const text = nodeText(node.content as readonly { kind?: string; type?: string; text?: string }[])
           const answers = node.isError ? null : answersFromResult(text)
-          const error = answers !== null ? '' : (node.isError ? '已取消' : '未收到答案')
+          const error = answers !== null ? '' : (node.isError ? QUESTION_CANCELLED : QUESTION_UNANSWERED)
           const segments = [...last.segments]
           segments[at] = { ...segment, answers, error }
           candidate[candidate.length - 1] = { ...last, segments }
@@ -670,7 +673,7 @@ export class VoiceController {
     if (this.#recognitionHandle !== null) return
     const recognizer = this.#recognizerFor()
     if (!recognizer.supported()) {
-      this.#notifyError('此浏览器不支持语音采集（需要麦克风与 WebSocket）')
+      this.#notifyError(this.#deps.t('err.unsupported'))
       this.#degradeToIdle()
       return
     }
@@ -696,9 +699,10 @@ export class VoiceController {
       onLink: up => this.#onLink(up),
       onFinal: text => this.#onFinalUtterance(text),
       onEnd: () => { /* the recognizer reconnects itself */ },
-      onError: (message, fatal) => {
+      onError: (message, fatal, code) => {
         if (fatal) {
-          this.#notifyError(message)
+          const key = bridgeErrorKey(code)
+          this.#notifyError(key !== null ? this.#deps.t(key) : message)
           this.#degradeToIdle()
         }
       },
@@ -723,7 +727,7 @@ export class VoiceController {
   #recognizerFor(): CloudRecognizer {
     const vendor = resolveSettings(this.#deps.settings()).asrTheme === 'xfyun' ? 'xfyun' : 'qwen'
     if (this.#asrCache !== null && this.#asrCache.id === vendor) return this.#asrCache.recognizer
-    const recognizer = new CloudRecognizer(vendor)
+    const recognizer = new CloudRecognizer(vendor, this.#deps.t)
     this.#asrCache = { id: vendor, recognizer }
     return recognizer
   }
@@ -743,8 +747,11 @@ export class VoiceController {
     this.status.patch({ phase: 'idle', interim: '', caption: '' })
   }
 
-  /** Surface a voice failure on the composer (visible outside the overlay). */
-  #notifyError(text: string): void {
+  /** Surface a voice failure on the composer (visible outside the overlay).
+   *  A string passes through; an Error is localized when it carries a known
+   *  host-bridge code, otherwise its raw (vendor) message is kept. */
+  #notifyError(error: unknown): void {
+    const text = typeof error === 'string' ? error : errorText(this.#deps.t, error)
     this.status.patch({ error: text })
     this.#deps.notify('error', text)
   }
@@ -943,7 +950,7 @@ export class VoiceController {
       session.done()
       this.#session = null
       try { await session.finished } catch (error) {
-        this.#notifyError(error instanceof Error ? error.message : String(error))
+        this.#notifyError(error)
       }
       this.#endSpeaking()
     }
@@ -1062,10 +1069,10 @@ export class VoiceController {
     this.#resolvedWaits.add(wait.key)
     try {
       void wait.respond(result).catch(error => {
-        this.#notifyError(error instanceof Error ? error.message : String(error))
+        this.#notifyError(error)
       })
     } catch (error) {
-      this.#notifyError(error instanceof Error ? error.message : String(error))
+      this.#notifyError(error)
     }
     // The turn resumes once the host settles the wait: back to the watch; the
     // resumed prose opens a fresh synthesis session on its own.
@@ -1116,7 +1123,7 @@ export class VoiceController {
     this.#replyTimer = setTimeout(() => {
       if (this.#disposed || this.status.getSnapshot().phase !== 'thinking') return
       this.#teardownReplyWatch()
-      this.#notifyError('回复等待超时')
+      this.#notifyError(this.#deps.t('err.replyTimeout'))
       this.#finishRound()
     }, REPLY_TIMEOUT_MS)
   }
@@ -1224,7 +1231,7 @@ export class VoiceController {
     try {
       await session.finished
     } catch (error) {
-      this.#notifyError(error instanceof Error ? error.message : String(error))
+      this.#notifyError(error)
     }
     // A barge-in may have submitted a newer round while we waited; that
     // round owns the loop now and a stale settle must not re-arm over it.
@@ -1302,7 +1309,7 @@ export class VoiceController {
         ? startSession.call(provider, opts, interrupted, progress)
         : sessionFromSpeak(provider, opts, interrupted, progress)
     } catch (error) {
-      this.#notifyError(error instanceof Error ? error.message : String(error))
+      this.#notifyError(error)
       return null
     }
     return this.#session
@@ -1352,7 +1359,7 @@ export class VoiceController {
     const themeId = resolveSettings(this.#deps.settings()).ttsTheme
     if (this.#ttsCache !== null && this.#ttsCache.id === themeId) return this.#ttsCache.provider
     const theme = voiceThemeOf(themeId) ?? voiceThemeOf('system')!
-    const provider = theme.create()
+    const provider = theme.create(this.#deps.t)
     this.#ttsCache = { id: theme.id, provider }
     return provider
   }

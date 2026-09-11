@@ -5,6 +5,7 @@
 import type { ReactElement } from 'react'
 import type { TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
+import type { VoiceTranslate } from './locales.ts'
 
 /**
  * Selector-hook shape the renderer binds for each inject `hooks` member
@@ -66,15 +67,16 @@ export interface VoiceSurfaceProps {
   settings(): { rate: number; voiceName: string; voiceLang: string; ttsTheme: string; speakerByTheme: Record<string, string>; waveStyle: string; asrTheme: string }
 }
 
-/** Props of the mic button (composer tool-row seat): the injected face only. */
-export type MicButtonProps = VoiceSurfaceProps
+/** Props of the mic button (composer tool-row seat): the injected face plus
+ *  the framework-injected locale seat (`locale: NS` on the registration). */
+export type MicButtonProps = VoiceSurfaceProps & { t: VoiceTranslate }
 
 /**
  * The mic button: the text mode's single voice affordance. Idle → click arms
  * the hands-free loop (the call overlay mounts with it); any active state →
  * click hangs up. Ambiguity-free: a second click always closes, never submits.
  */
-export function MicButton({ useVoice, toggleVoice }: MicButtonProps): ReactElement {
+export function MicButton({ useVoice, toggleVoice, t }: MicButtonProps): ReactElement {
   const mode = useVoice(s => s.mode)
   const phase = useVoice(s => s.phase)
   const active = mode === 'loop'
@@ -83,7 +85,7 @@ export function MicButton({ useVoice, toggleVoice }: MicButtonProps): ReactEleme
     active ? 'is-loop' : '',
     phase === 'listening' ? 'is-listening' : '',
   ].filter(Boolean).join(' ')
-  const title = active ? '退出语音对话（Esc）' : '语音对话：免手多轮（Esc 退出）'
+  const title = active ? t('mic.titleActive') : t('mic.titleIdle')
   return (
     <button
       type='button'
@@ -94,7 +96,7 @@ export function MicButton({ useVoice, toggleVoice }: MicButtonProps): ReactEleme
       onClick={toggleVoice}
     >
       <MicIcon />
-      {active && <span className='dsh-voice-mic-badge'>对话</span>}
+      {active && <span className='dsh-voice-mic-badge'>{t('mic.badge')}</span>}
     </button>
   )
 }

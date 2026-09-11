@@ -8,13 +8,16 @@
 
 import { useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { RATE_STOPS, nearestRateIndex, nearestRateLabel } from './voice-settings.ts'
+import type { VoiceTranslate } from './locales.ts'
 
 const TRAVEL = RATE_STOPS.length - 1
 
-export function RateMagnetSlider({ rate, onChange, className }: {
+export function RateMagnetSlider({ rate, onChange, className, t }: {
   rate: number
   onChange(next: number): void
   className?: string
+  /** Namespace-bound translator (the framework locale seat). */
+  t: VoiceTranslate
 }): ReactElement {
   // Displayed stop. Only the user moves it, and always onto a stop, so the
   // `rate` prop needs no external-sync path (nothing else writes it).
@@ -111,7 +114,7 @@ export function RateMagnetSlider({ rate, onChange, className }: {
           onChange={onInput}
           onPointerDown={onPointerDown}
           onKeyDown={onKeyDown}
-          aria-label='语速'
+          aria-label={t('rate.aria')}
           aria-valuemin={0}
           aria-valuemax={TRAVEL}
           aria-valuenow={index}

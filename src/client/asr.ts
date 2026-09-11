@@ -18,6 +18,7 @@
 // timers (the post-hang-up capture bug was born from breaking that rule).
 
 import type { RecognitionEvents, RecognitionHandle, Recognizer, RecognizerStartOptions } from './speech.ts'
+import type { VoiceTranslate } from './locales.ts'
 
 export type AsrVendor = 'qwen' | 'xfyun'
 
@@ -73,9 +74,11 @@ registerProcessor('asr-tap', AsrTap)
 
 export class CloudRecognizer implements Recognizer {
   readonly #vendor: AsrVendor
+  readonly #t: VoiceTranslate
 
-  constructor(vendor: AsrVendor) {
+  constructor(vendor: AsrVendor, t: VoiceTranslate) {
     this.#vendor = vendor
+    this.#t = t
   }
 
   supported(): boolean {
@@ -131,9 +134,9 @@ export class CloudRecognizer implements Recognizer {
     }
 
     const handleUpstream = (data: string): void => {
-      let event: { type?: string; text?: string; error?: string }
+      let event: { type?: string; text?: string; error?: string; code?: string }
       try {
-        event = JSON.parse(data) as { type?: string; text?: string; error?: string }
+        event = JSON.parse(data) as { type?: string; text?: string; error?: string; code?: string }
       } catch {
         return
       }
@@ -163,7 +166,7 @@ export class CloudRecognizer implements Recognizer {
         disposed = true
         releaseMic()
         closeSocket()
-        events.onError(event.error ?? '语音识别失败', true)
+        events.onError(event.error ?? this.#t('err.asrFailed'), true, event.code)
       }
     }
 
@@ -217,7 +220,7 @@ export class CloudRecognizer implements Recognizer {
         }
         source.connect(tap)
       } catch {
-        events.onError('麦克风不可用或被拒绝', true)
+        events.onError(this.#t('err.micDenied'), true)
       }
     }
 

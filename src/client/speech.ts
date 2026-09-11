@@ -2,6 +2,8 @@
 // API behind narrow interfaces so the controller stays engine-agnostic and the
 // Chrome-specific quirks (auto-disconnect, restart backoff) live in one file.
 
+import type { VoiceTranslate } from './locales.ts'
+
 /** One recognized utterance fragment. */
 export interface RecognitionEvents {
   /** Best partial transcript so far for the current utterance. */
@@ -20,8 +22,9 @@ export interface RecognitionEvents {
   /** Transport state: false while the recognizer is reconnecting (no events
    *  can flow), true once a fresh session is ready. */
   onLink?(up: boolean): void
-  /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported). */
-  onError(message: string, fatal: boolean): void
+  /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported).
+   *  `code` carries a stable host-bridge code when the failure came from one. */
+  onError(message: string, fatal: boolean, code?: string): void
 }
 
 /** Continuous speech recognition handle. Chrome/Edge only in practice. */
@@ -174,9 +177,14 @@ export class SystemTtsProvider implements TtsProvider {
   readonly id = 'system'
   /** Chunk size in characters (sentence-bounded; CJK reads ~4 chars/sec). */
   static readonly CHUNK_CHARS = 120
+  readonly #t: VoiceTranslate
   #interrupted: (() => void) | null = null
   /** Stops the utterance on the air for the current speak() session. */
   #sessionCancel: (() => void) | null = null
+
+  constructor(t: VoiceTranslate) {
+    this.#t = t
+  }
 
   supported(): boolean {
     return typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -270,7 +278,7 @@ export class SystemTtsProvider implements TtsProvider {
           synth.cancel()
           resolveDone?.()
         } else {
-          settleFail(`语音合成错误：${event.error}`)
+          settleFail(this.#t('err.synth', { detail: event.error }))
         }
       }
       speaking = true
@@ -336,7 +344,7 @@ export class SystemTtsProvider implements TtsProvider {
             onInterrupted()
             settle(() => reject(new Error('interrupted')))
           } else {
-            settle(() => reject(new Error(`语音合成错误：${event.error}`)))
+            settle(() => reject(new Error(this.#t('err.synth', { detail: event.error }))))
           }
         }
         synth.speak(utterance)

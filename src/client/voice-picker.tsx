@@ -14,6 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactElement } from 'react'
 import type { speakersForTheme } from './voice-themes.ts'
+import type { VoiceTranslate, VoiceKey } from './locales.ts'
 
 interface VoicePickerProps {
   options: ReturnType<typeof speakersForTheme>
@@ -25,6 +26,8 @@ interface VoicePickerProps {
   locked?: boolean
   /** Tooltip for the locked trigger. */
   lockHint?: string
+  /** Namespace-bound translator (the framework locale seat). */
+  t: VoiceTranslate
   ariaLabel: string
   strategy?: 'absolute' | 'portal'
   onChange(id: string): void
@@ -38,18 +41,21 @@ interface Anchor {
   maxHeight: number
 }
 
-export function VoicePicker({ options, value, defaultId = '', locked = false, lockHint, ariaLabel, strategy = 'absolute', onChange }: VoicePickerProps): ReactElement {
+export function VoicePicker({ options, value, defaultId = '', locked = false, lockHint, t, ariaLabel, strategy = 'absolute', onChange }: VoicePickerProps): ReactElement {
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
   const currentRef = useRef<HTMLButtonElement | null>(null)
 
+  /** The '' row is the theme/platform default: its label is copy, not data. */
+  const displayLabel = (option: { id: string; label: string }): string =>
+    option.id === '' ? t('picker.systemDefault') : option.label
   const labelOf = (id: string): string => {
     const hit = options.find(o => o.id === id)
-    return hit !== undefined && !('more' in hit) ? hit.label : (id === '' ? '系统默认' : id)
+    return hit !== undefined && !('more' in hit) ? displayLabel(hit) : (id === '' ? t('picker.systemDefault') : id)
   }
-  const groups = [...new Set(options.filter(o => 'group' in o).map(o => (o as { group: string }).group))]
+  const groups = [...new Set(options.flatMap(o => ('group' in o && o.group !== undefined ? [o.group] : [])))] as VoiceKey[]
 
   // Outside click / Esc folds the popup. The portal popup lives outside the
   // root, so it is checked explicitly.
@@ -126,7 +132,7 @@ export function VoicePicker({ options, value, defaultId = '', locked = false, lo
       onClick={() => pick(option.id)}
     >
       <span className='dsh-voice-speaker-check' aria-hidden='true'>{option.id === value ? '✓' : ''}</span>
-      <span className='dsh-voice-speaker-label'>{option.label}{option.id === defaultId ? '（默认）' : ''}</span>
+      <span className='dsh-voice-speaker-label'>{displayLabel(option)}{option.id === defaultId ? t('picker.defaultMark') : ''}</span>
     </button>
   )
   const popup = (
@@ -142,9 +148,9 @@ export function VoicePicker({ options, value, defaultId = '', locked = false, lo
       {groups.length === 0
         ? options.map(option => item(option))
         : groups.map(group => (
-          <div key={group} role='group' aria-label={group}>
-            <div className='dsh-voice-speaker-group'>{group}</div>
-            {options.filter(o => 'group' in o && (o as { group: string }).group === group).map(option => item(option))}
+          <div key={group} role='group' aria-label={t(group)}>
+            <div className='dsh-voice-speaker-group'>{t(group)}</div>
+            {options.filter(o => 'group' in o && o.group === group).map(option => item(option))}
           </div>
         ))}
     </div>

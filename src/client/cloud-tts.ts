@@ -6,6 +6,7 @@
 //     continuous, so sample-accurate scheduling removes every stitch seam).
 
 import type { TtsProvider, TtsSession, SpeakOptions } from './speech.ts'
+import { bridgeErrorKey, type VoiceTranslate } from './locales.ts'
 
 /** Karaoke-marker progress cadence (players only — a sentence lasts seconds). */
 const MARK_TICK_MS = 500
@@ -83,14 +84,16 @@ export function chunkForCloud(text: string, size = 120): string[] {
 export class BridgeAudioTtsProvider implements TtsProvider {
   readonly id: string
   readonly #route: string
+  readonly #t: VoiceTranslate
   #interrupt: (() => void) | null = null
   /** Session created by the last startSession call — cancel() must reach it:
    *  the controller's skip / barge-in / hang-up all cancel the provider. */
   #activeSession: TtsSession | null = null
 
-  constructor(id: string, route: string) {
+  constructor(id: string, route: string, t: VoiceTranslate) {
     this.id = id
     this.#route = route
+    this.#t = t
   }
 
   supported(): boolean {
@@ -138,8 +141,11 @@ export class BridgeAudioTtsProvider implements TtsProvider {
           body: JSON.stringify({ text: chunks[index]!, voice: opts.voiceName, rate: opts.rate, ...this.#routeExtras(opts) }),
         })
         if (!response.ok) {
-          const body = (await response.json().catch(() => null)) as { error?: string } | null
-          throw new Error(body?.error ?? `语音桥请求失败（HTTP ${response.status}）`)
+          const body = (await response.json().catch(() => null)) as { error?: string; code?: string } | null
+          const failure = body?.error ?? this.#t('err.bridgeHttp', { status: response.status })
+          const bridgeFailure = new Error(failure) as Error & { code?: string }
+          if (body?.code !== undefined) bridgeFailure.code = body.code
+          throw bridgeFailure
         }
         const url = URL.createObjectURL(await response.blob())
         // A prefetch result lands in the cache; the consuming read removes it.
@@ -175,11 +181,11 @@ export class BridgeAudioTtsProvider implements TtsProvider {
             audio.onerror = () => {
               URL.revokeObjectURL(url)
               if (settled) return
-              fail('音频播放失败')
+              fail(this.#t('err.playback'))
             }
             void audio.play().catch(error => {
               if (settled) return
-              fail(`音频播放失败：${error instanceof Error ? error.message : String(error)}`)
+              fail(this.#t('err.playbackDetail', { detail: error instanceof Error ? error.message : String(error) }))
             })
           } catch (error) {
             fail(error instanceof Error ? error.message : String(error))
@@ -255,8 +261,11 @@ export class BridgeAudioTtsProvider implements TtsProvider {
             body: JSON.stringify({ text, voice: opts.voiceName, rate: opts.rate, ...this.#routeExtras(opts) }),
           })
           if (!response.ok) {
-            const body = (await response.json().catch(() => null)) as { error?: string } | null
-            throw new Error(body?.error ?? `语音桥请求失败（HTTP ${response.status}）`)
+            const body = (await response.json().catch(() => null)) as { error?: string; code?: string } | null
+            const failure = body?.error ?? this.#t('err.bridgeHttp', { status: response.status })
+            const bridgeFailure = new Error(failure) as Error & { code?: string }
+            if (body?.code !== undefined) bridgeFailure.code = body.code
+            throw bridgeFailure
           }
           const url = URL.createObjectURL(await response.blob())
           // A cancelled session must not still fire a chunk that was in flight.
@@ -314,7 +323,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
             URL.revokeObjectURL(url)
             busy = false
             playing = null
-            if (!settled) settleFail('音频播放失败')
+            if (!settled) settleFail(this.#t('err.playback'))
           }
           if (audio.onended === null) {
             audio.onended = () => { finishPiece() }
@@ -325,7 +334,7 @@ export class BridgeAudioTtsProvider implements TtsProvider {
             stopTick()
             busy = false
             playing = null
-            if (!settled) settleFail(`音频播放失败：${error instanceof Error ? error.message : String(error)}`)
+            if (!settled) settleFail(this.#t('err.playbackDetail', { detail: error instanceof Error ? error.message : String(error) }))
           })
         } catch (error) {
           busy = false
@@ -375,8 +384,8 @@ export class BridgeAudioTtsProvider implements TtsProvider {
 
 /** iFlytek streaming TTS via `/voice-tts/xfyun`. */
 export class XfyunTtsProvider extends BridgeAudioTtsProvider {
-  constructor() {
-    super('xfyun', '/voice-tts/xfyun')
+  constructor(t: VoiceTranslate) {
+    super('xfyun', '/voice-tts/xfyun', t)
   }
 }
 
@@ -397,11 +406,13 @@ class PcmStreamPlayer {
   #cancelled = false
   /** Playback schedule with per-chunk RMS, for the "sounding now" level. */
   #levels: { start: number; end: number; rms: number }[] = []
+  readonly #t: VoiceTranslate
 
-  constructor() {
+  constructor(t: VoiceTranslate) {
+    this.#t = t
     const Ctor = window.AudioContext
       ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (Ctor === undefined) throw new Error('此浏览器不支持 Web Audio（需要 Chrome/Edge）')
+    if (Ctor === undefined) throw new Error(this.#t('err.webAudio'))
     this.#context = new Ctor({ sampleRate: 24_000 })
     this.#gain = this.#context.createGain()
     this.#gain.connect(this.#context.destination)
@@ -500,7 +511,12 @@ function qwenParam(opts: SpeakOptions, key: 'model' | 'endpoint'): string {
  */
 export class QwenRealtimeTtsProvider implements TtsProvider {
   readonly id = 'qwen'
+  readonly #t: VoiceTranslate
   #activeSession: TtsSession | null = null
+
+  constructor(t: VoiceTranslate) {
+    this.#t = t
+  }
 
   supported(): boolean {
     return typeof window !== 'undefined'
@@ -612,7 +628,7 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       }
       socket.onmessage = (event) => {
         if (typeof event.data === 'string') {
-          let frame: { type?: string; error?: string }
+          let frame: { type?: string; error?: string; code?: string }
           try {
             frame = JSON.parse(event.data) as { type?: string; error?: string }
           } catch {
@@ -632,12 +648,13 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
             return
           }
           if (frame.type === 'error') {
-            settleFail(frame.error ?? '千问合成失败')
+            const key = bridgeErrorKey(frame.code)
+            settleFail(key !== null ? this.#t(key) : (frame.error ?? this.#t('err.qwenSynth')))
           }
           return
         }
         // Binary frame: one PCM delta → the gapless schedule.
-        if (player === null) player = new PcmStreamPlayer()
+        if (player === null) player = new PcmStreamPlayer(this.#t)
         player.push(event.data as ArrayBuffer)
         sawAudio = true
       }
@@ -650,15 +667,15 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
             settled = true
             resolveDone?.()
           } else {
-            settleFail('千问连接中断')
+            settleFail(this.#t('err.qwenLost'))
           }
         }
       }
       socket.onerror = () => {
-        if (!settled) settleFail('千问连接失败')
+        if (!settled) settleFail(this.#t('err.qwenConnect'))
       }
     } catch (error) {
-      settleFail(`千问连接失败：${error instanceof Error ? error.message : String(error)}`)
+      settleFail(this.#t('err.qwenConnectDetail', { detail: error instanceof Error ? error.message : String(error) }))
     }
 
     const session: TtsSession = {

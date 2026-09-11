@@ -28,6 +28,8 @@ import type { IConversation } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the `settings.plugin.item` keyed-slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the ctx.locale Context merge (the dictionary service).
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { VoiceController } from './voice-controller.ts'
 import { resolveSettings, VOICE_DEFAULTS, type VoiceSettings } from './voice-settings.ts'
 import { MicButton, type VoiceInjected } from './components.tsx'
@@ -35,9 +37,10 @@ import { CallOverlay } from './call-overlay.tsx'
 import { VoiceSettingsCard, type VoiceCardInjected, type VoiceCardState } from './settings-card.tsx'
 import { injectVoiceStyles } from './styles.ts'
 import { SnapshotStore } from './store.ts'
+import { NS, zh, en } from './locales.ts'
 
 /** Services the browser half requires (fiber inject waiting). */
-export const inject = ['slots', 'sessions', 'conversation', 'settingsScope', 'connection']
+export const inject = ['slots', 'sessions', 'conversation', 'settingsScope', 'connection', 'locale']
 
 /** Slots this package registers into (declared by ui-conversation/ui-settings-plugins). */
 const INPUT_LEFT = 'conversation.input.left'
@@ -54,6 +57,12 @@ export function apply(ctx: ClientContext): void {
   const conversation = ctx.conversation
   const api = (ctx.get('connection') as ConnectionHandle).api
   injectVoiceStyles()
+  // Bilingual copy: the platform locale service owns the active language and
+  // re-renders every slot entry whose registration declares `locale: NS`,
+  // handing them a fresh `t`. The bound function below reads the active
+  // locale at call time, so controller notices follow switches too.
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'voice-talk: dictionaries')
+  const t = ctx.locale.bind(NS)
 
   const settingsScope: SettingsScope<VoiceSettings> = ctx.settingsScope.bind({ namespace: 'voice' })
   const settingsNow = (): VoiceSettings => {
@@ -87,6 +96,7 @@ export function apply(ctx: ClientContext): void {
       readSnapshot: () => binding.session.getSnapshot(),
       subscribeSnapshot: listener => binding.session.subscribe(listener),
       settings: settingsNow,
+      t,
     })
     controllers.set(sessionId, controller)
     // The call overlay rides the shell overlay layer (root scope, additive
@@ -95,6 +105,7 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.register({
       name: 'shell.overlay',
       id: `voice-call-${sessionId}`,
+      locale: NS,
       inject: (): VoiceInjected => ({
         hooks: { voice: controller.status },
         transcript: controller.transcript,
@@ -141,6 +152,7 @@ export function apply(ctx: ClientContext): void {
     name: INPUT_LEFT,
     id: 'voice-mic',
     order: 20,
+    locale: NS,
     inject: (sessionId): VoiceInjected => {
       const controller = controllerFor(sessionId)
       return {
@@ -197,6 +209,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
     name: 'settings.plugin.item',
     key: 'voice',
+    locale: NS,
     inject: (): VoiceCardInjected => ({
       hooks: { voiceCard: cardStore },
       set: (field, value) => { void settingsScope.set(field, value).catch(error => console.error('[dsh-voice-talk] settings write failed:', error)) },

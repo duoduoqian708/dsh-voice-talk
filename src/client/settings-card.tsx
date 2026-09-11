@@ -11,6 +11,7 @@ import { listVoiceThemes, speakersForTheme, voiceThemeOf, type VoiceTheme } from
 import { VoicePicker } from './voice-picker.tsx'
 import { RateMagnetSlider } from './rate-magnet.tsx'
 import { CloudRecognizer, type AsrVendor } from './asr.ts'
+import { bridgeErrorKey, type VoiceKey, type VoiceTranslate } from './locales.ts'
 import type { RecognitionHandle } from './speech.ts'
 
 /** Card state: the resolved section plus which fields the user overrode. */
@@ -42,6 +43,8 @@ export interface VoiceCardProps {
   set(field: string, value: unknown): void
   /** Credential read/write (framework share from the inject face). */
   credentials: VoiceCardInjected['credentials']
+  /** Namespace-bound translator (the framework locale seat). */
+  t: VoiceTranslate
 }
 
 /** Credential refs per theme id (must match the host bridge's table).
@@ -58,13 +61,13 @@ const THEME_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: strin
 }
 
 /** Theme → which settings fields its modal exposes (hard-coded, no framework). */
-const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
+const THEME_MODAL_FIELDS: Record<string, readonly { field: string; label: VoiceKey; hint?: VoiceKey; placeholder?: string }[]> = {
   qwen: [
-    { field: 'qwenModel', label: '模型 ID', placeholder: 'qwen3-tts-flash-realtime' },
-    { field: 'qwenEndpoint', label: '接口地址', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
+    { field: 'qwenModel', label: 'modal.model', placeholder: 'qwen3-tts-flash-realtime' },
+    { field: 'qwenEndpoint', label: 'modal.endpoint', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
   ],
   xfyun: [
-    { field: 'xfyunEndpoint', label: '接口地址', placeholder: 'wss://tts-api.xfyun.cn/v2/tts' },
+    { field: 'xfyunEndpoint', label: 'modal.endpoint', placeholder: 'wss://tts-api.xfyun.cn/v2/tts' },
   ],
 }
 
@@ -151,10 +154,6 @@ function maskRef(mask: boolean, value: string): string {
   return `${v.slice(0, 4)}****${v.slice(-4)}`
 }
 
-/** The sentence the try-listen buttons read (covers comma/period/question
- *  pauses so voice and rate are easy to judge). */
-const TRY_TEXT = '你好，我是你的语音助手。很高兴为你朗读这段试听内容，你可以听听我的音色是否自然、语速是否合适。准备好了吗？'
-
 /** Fixed empty refs list (module constant — a per-render `?? []` churned identity). */
 const EMPTY_REFS: readonly { ref: string; label: string }[] = []
 
@@ -183,7 +182,7 @@ function stopTryAudio(): void {
 }
 
 /** Try-listen through the one-shot bridge route (cloud themes). */
-function tryCloud(theme: string, voice: string, rate: number, extra: Record<string, string>, text: string = TRY_TEXT): void {
+function tryCloud(theme: string, voice: string, rate: number, extra: Record<string, string>, text: string, t: VoiceTranslate): void {
   const seq = ++trySeq
   stopTryAudio()
   void fetch(`/voice-tts/${theme}`, {
@@ -192,8 +191,9 @@ function tryCloud(theme: string, voice: string, rate: number, extra: Record<stri
     body: JSON.stringify({ text, voice, rate, ...extra }),
   }).then(async response => {
     if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null
-      window.alert(body?.error ?? '云端合成失败')
+      const body = (await response.json().catch(() => null)) as { error?: string; code?: string } | null
+      const key = bridgeErrorKey(body?.code)
+      window.alert(key !== null ? t(key) : (body?.error ?? t('modal.cloudFail')))
       return
     }
     const url = URL.createObjectURL(await response.blob())
@@ -210,10 +210,10 @@ function tryCloud(theme: string, voice: string, rate: number, extra: Record<stri
 }
 
 /** Try-listen for the system theme (speechSynthesis). */
-function trySystem(voiceName: string, lang: string, rate: number): void {
+function trySystem(voiceName: string, lang: string, rate: number, text: string): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
   window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(TRY_TEXT)
+  const utterance = new SpeechSynthesisUtterance(text)
   utterance.lang = lang
   utterance.rate = rate
   if (voiceName !== '') {
@@ -224,11 +224,12 @@ function trySystem(voiceName: string, lang: string, rate: number): void {
 }
 
 /** Try-listen for a theme given resolved settings + a speaker override. */
-function tryListen(theme: string, settings: Required<VoiceSettings>, speakerOverride: string): void {
+function tryListen(theme: string, settings: Required<VoiceSettings>, speakerOverride: string, t: VoiceTranslate): void {
   const voice = speakerOverride || settings.speakerByTheme[theme] || ''
   const rate = settings.rateByTheme[theme] ?? settings.rate
+  const text = t('modal.tryText')
   if (theme === 'system') {
-    trySystem(voice || settings.voiceName, settings.voiceLang, rate)
+    trySystem(voice || settings.voiceName, settings.voiceLang, rate, text)
     return
   }
   const extra: Record<string, string> = {}
@@ -237,7 +238,7 @@ function tryListen(theme: string, settings: Required<VoiceSettings>, speakerOver
     extra.endpoint = settings.qwenEndpoint
   }
   if (theme === 'xfyun') extra.endpoint = settings.xfyunEndpoint
-  tryCloud(theme, voice, rate, extra)
+  tryCloud(theme, voice, rate, extra, text, t)
 }
 
 /** Theme → endpoint settings field (used to build the modal try-listen). */
@@ -248,26 +249,26 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
 }
 
 /** The listening engines: same credential refs as their 说 twins share. */
-const ASR_ENGINES: readonly { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }[] = [
+const ASR_ENGINES: readonly { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; setupUrl?: string }[] = [
   {
-    id: 'qwen', label: '千问', refs: ['VOICE_QWEN_API_KEY'],
-    note: '复用 DashScope API Key（与说共用同一凭证）',
+    id: 'qwen', labelKey: 'theme.qwen', refs: ['VOICE_QWEN_API_KEY'],
+    noteKey: 'theme.asrQwenNote',
   },
   {
-    id: 'xfyun', label: '讯飞', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
-    note: '听写需在讯飞控制台开通「语音听写（流式版）」服务（每日免费 500 次）',
+    id: 'xfyun', labelKey: 'theme.xfyun', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
+    noteKey: 'theme.asrXfyunNote',
     setupUrl: 'https://console.xfyun.cn/services/iat',
   },
 ]
 
 /** The 听 modal's per-engine settings fields (model/endpoint override). */
-const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; hint?: string; placeholder?: string }[]> = {
+const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: VoiceKey; hint?: VoiceKey; placeholder?: string }[]> = {
   qwen: [
-    { field: 'asrQwenModel', label: '模型 ID', placeholder: 'qwen3-asr-flash-realtime' },
-    { field: 'asrQwenEndpoint', label: '接口地址', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
+    { field: 'asrQwenModel', label: 'modal.model', placeholder: 'qwen3-asr-flash-realtime' },
+    { field: 'asrQwenEndpoint', label: 'modal.endpoint', placeholder: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime' },
   ],
   xfyun: [
-    { field: 'asrXfyunEndpoint', label: '接口地址', placeholder: 'wss://iat-api.xfyun.cn/v2/iat' },
+    { field: 'asrXfyunEndpoint', label: 'modal.endpoint', placeholder: 'wss://iat-api.xfyun.cn/v2/iat' },
   ],
 }
 
@@ -278,9 +279,9 @@ const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: string; 
  * cache first, describe() IPC only when it misses.
  */
 function AsrRow({
-  engine, value, credentials, set, refreshKey, disabled, onActivate, onRefresh,
+  engine, value, credentials, set, refreshKey, disabled, onActivate, onRefresh, t,
 }: {
-  engine: { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }
+  engine: { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; setupUrl?: string }
   value: Required<VoiceSettings>
   credentials: VoiceCardProps['credentials']
   set(field: string, value: unknown): void
@@ -288,6 +289,7 @@ function AsrRow({
   disabled: boolean
   onActivate(): void
   onRefresh(): void
+  t: VoiceTranslate
 }): ReactElement {
   const refs = ASR_CREDENTIAL_REFS[engine.id] ?? EMPTY_REFS
   const [configured, setConfigured] = useState<boolean | null>(null)
@@ -313,29 +315,31 @@ function AsrRow({
   }, [credentials, engine.id, engine.refs, refreshKey])
 
   const active = value.asrTheme === engine.id
-  const statusWord = configured === null ? '检查凭证中…' : configured ? (active ? '当前启用' : '凭证已配置') : '凭证未配置'
+  const statusWord = configured === null
+    ? t('engine.checking')
+    : configured ? (active ? t('engine.active') : t('engine.configured')) : t('engine.missing')
   const pseudoTheme = voiceThemeOf(engine.id) ?? voiceThemeOf('system')!
   return (
     <div className='dsh-voice-engine-row'>
       <div className='dsh-voice-engine-info'>
         <div className='dsh-voice-engine-line'>
-          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{engine.label}</span>
+          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{t(engine.labelKey)}</span>
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
         </div>
       </div>
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
           onClick={onActivate}>
-          {active ? '已启用' : '启用'}
+          {active ? t('engine.enabled') : t('engine.enable')}
         </button>
         <button type='button' className='dsh-voice-provider-btn' onClick={() => setTestOpen(true)}>
-          试音
+          {t('engine.test')}
         </button>
         <button type='button' className='dsh-voice-provider-btn' onClick={() => setModalOpen(true)}>
-          设置
+          {t('engine.setup')}
         </button>
       </div>
-      {testOpen && <AsrTestModal engine={engine} value={value} onClose={() => setTestOpen(false)} />}
+      {testOpen && <AsrTestModal engine={engine} value={value} onClose={() => setTestOpen(false)} t={t} />}
       {modalOpen && (
         <ProviderModal
           theme={pseudoTheme}
@@ -345,13 +349,14 @@ function AsrRow({
           onRefresh={onRefresh}
           onClose={() => setModalOpen(false)}
           variant={{
-            title: engine.label,
+            title: t(engine.labelKey),
             refs,
             fields: ASR_MODAL_FIELDS[engine.id] ?? [],
-            note: engine.note,
+            note: engine.noteKey !== undefined ? t(engine.noteKey) : undefined,
             setupUrl: engine.setupUrl,
             tryListen: false,
           }}
+          t={t}
         />
       )}
     </div>
@@ -376,11 +381,12 @@ const ASR_CREDENTIAL_REFS: Record<string, readonly { ref: string; label: string;
  *  Credential/vendor failures surface here in plain text, so the settings
  *  page can self-diagnose without a call. */
 function AsrTestModal({
-  engine, value, onClose,
+  engine, value, onClose, t,
 }: {
-  engine: { id: string; label: string; refs: readonly string[]; note?: string; setupUrl?: string }
+  engine: { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; setupUrl?: string }
   value: Required<VoiceSettings>
   onClose(): void
+  t: VoiceTranslate
 }): ReactElement {
   const [lines, setLines] = useState<string[]>([])
   const [interim, setInterim] = useState('')
@@ -388,16 +394,20 @@ function AsrTestModal({
   const handleRef = useRef<RecognitionHandle | null>(null)
 
   useEffect(() => {
-    const recognizer = new CloudRecognizer(engine.id as AsrVendor)
+    const recognizer = new CloudRecognizer(engine.id as AsrVendor, t)
     if (!recognizer.supported()) {
-      setError('此页面无法使用麦克风（需要 https 或本机 localhost 访问）')
+      setError(t('err.micPage'))
       return
     }
     handleRef.current = recognizer.start({
       onInterim: setInterim,
       onFinal: text => { setLines(list => [...list, text]); setInterim('') },
       onEnd: () => { /* unexpected drops re-arm inside the recognizer */ },
-      onError: (message, fatal) => { if (fatal) setError(message) },
+      onError: (message, fatal, code) => {
+        if (!fatal) return
+        const key = bridgeErrorKey(code)
+        setError(key !== null ? t(key) : message)
+      },
     }, {
       // 所配即所测：弹窗里配的模型/端点/语言原样带进 hello 帧。
       lang: value.voiceLang,
@@ -408,26 +418,26 @@ function AsrTestModal({
       handleRef.current?.stop()
       handleRef.current = null
     }
-  }, [engine.id, value.voiceLang, value.asrQwenModel, value.asrQwenEndpoint, value.asrXfyunEndpoint])
+  }, [engine.id, value.voiceLang, value.asrQwenModel, value.asrQwenEndpoint, value.asrXfyunEndpoint, t])
 
   return (
     <div className='dsh-voice-modal-veil' onClick={onClose}>
       <div className='dsh-voice-modal' onClick={event => event.stopPropagation()}>
         <div className='dsh-voice-modal-head'>
-          <h4 className='dsh-voice-modal-title'>{engine.label} · 试音</h4>
-          <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label='关闭'>✕</button>
+          <h4 className='dsh-voice-modal-title'>{t('modal.testTitle', { name: t(engine.labelKey) })}</h4>
+          <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label={t('modal.close')}>✕</button>
         </div>
         {error !== null
           ? <p className='dsh-voice-card-warn'>{error}</p>
-          : <p className='dsh-voice-setup-note'><i className='dsh-voice-test-dot' aria-hidden='true' />监听中 — 对着麦克风说话，文字出现在下方</p>}
+          : <p className='dsh-voice-setup-note'><i className='dsh-voice-test-dot' aria-hidden='true' />{t('modal.testHint')}</p>}
         <div className='dsh-voice-asr-test-text'>
           {lines.map((line, i) => <p key={i}>{line}</p>)}
           {interim !== '' && <p className='dsh-voice-asr-test-interim'>{interim}</p>}
           {lines.length === 0 && interim === '' && error === null && <p className='dsh-voice-asr-test-waiting'>…</p>}
         </div>
         <div className='dsh-voice-modal-footer'>
-          {error === null && <span className='dsh-voice-setup-ok'>关闭即停止识别</span>}
-          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
+          {error === null && <span className='dsh-voice-setup-ok'>{t('modal.testStop')}</span>}
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>{t('modal.done')}</button>
         </div>
       </div>
     </div>
@@ -436,7 +446,7 @@ function AsrTestModal({
 
 /** One engine row inside the unified panel: name + status + actions. */
 function EngineRow({
-  theme, value, credentials, set, refreshKey, onActivate, onRefresh,
+  theme, value, credentials, set, refreshKey, onActivate, onRefresh, t,
 }: {
   theme: VoiceTheme
   value: Required<VoiceSettings>
@@ -446,6 +456,7 @@ function EngineRow({
   refreshKey: number
   onActivate(): void
   onRefresh(): void
+  t: VoiceTranslate
 }): ReactElement {
   const refs = THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
   const needsSetup = theme.needsSetup === true && refs.length > 0
@@ -474,32 +485,32 @@ function EngineRow({
 
   const active = value.ttsTheme === theme.id
   const statusWord = !needsSetup
-    ? (active ? '当前启用' : '就绪')
-    : configured === null ? '检查凭证中…'
-      : configured ? (active ? '当前启用' : '凭证已配置')
-        : '凭证未配置'
+    ? (active ? t('engine.active') : t('engine.ready'))
+    : configured === null ? t('engine.checking')
+      : configured ? (active ? t('engine.active') : t('engine.configured'))
+        : t('engine.missing')
 
   return (
     <div className='dsh-voice-engine-row'>
       <div className='dsh-voice-engine-info'>
         <div className='dsh-voice-engine-line'>
-          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{theme.label}</span>
+          <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{t(theme.labelKey)}</span>
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
         </div>
-        {theme.note !== undefined && <p className='dsh-voice-engine-note'>{theme.note}</p>}
+        {theme.noteKey !== undefined && <p className='dsh-voice-engine-note'>{t(theme.noteKey)}</p>}
       </div>
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
           onClick={onActivate}>
-          {active ? '已启用' : '启用'}
+          {active ? t('engine.enabled') : t('engine.enable')}
         </button>
         <button type='button' className='dsh-voice-provider-btn'
-          onClick={() => tryListen(theme.id, value, value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? '')}>
-          试听
+          onClick={() => tryListen(theme.id, value, value.speakerByTheme[theme.id] ?? theme.defaultSpeaker ?? '', t)}>
+          {t('engine.preview')}
         </button>
         {needsSetup && (
           <button type='button' className='dsh-voice-provider-btn' onClick={() => setModalOpen(true)}>
-            设置
+            {t('engine.setup')}
           </button>
         )}
       </div>
@@ -511,6 +522,7 @@ function EngineRow({
           set={set}
           onRefresh={onRefresh}
           onClose={() => setModalOpen(false)}
+          t={t}
         />
       )}
     </div>
@@ -525,15 +537,15 @@ function EngineRow({
 interface ProviderModalVariant {
   title: string
   refs: readonly { ref: string; label: string; mask: boolean }[]
-  fields: readonly { field: string; label: string; hint?: string; placeholder?: string }[]
+  fields: readonly { field: string; label: VoiceKey; hint?: VoiceKey; placeholder?: string }[]
   note?: string
   setupUrl?: string
-  /** false hides the TTS-only 试听 section (speaker + prompt + buttons). */
+  /** false hides the TTS-only preview section (speaker + prompt + buttons). */
   tryListen?: boolean
 }
 
 function ProviderModal({
-  theme, value, credentials, set, onRefresh, onClose, variant,
+  theme, value, credentials, set, onRefresh, onClose, variant, t,
 }: {
   theme: VoiceTheme
   value: Required<VoiceSettings>
@@ -543,6 +555,7 @@ function ProviderModal({
   onClose(): void
   /** Set for the 听 rows: their tables + no TTS try-listen. */
   variant?: ProviderModalVariant
+  t: VoiceTranslate
 }): ReactElement {
   const refs = variant?.refs ?? THEME_CREDENTIAL_REFS[theme.id] ?? EMPTY_REFS
   const fields = variant?.fields ?? THEME_MODAL_FIELDS[theme.id] ?? []
@@ -567,7 +580,7 @@ function ProviderModal({
     Object.fromEntries(fields.map(f => [f.field, String(value[f.field as keyof Required<VoiceSettings>] ?? '')])),
   )
   const [speakerDraft, setSpeakerDraft] = useState(savedSpeaker)
-  const [promptDraft, setPromptDraft] = useState(TRY_TEXT)
+  const [promptDraft, setPromptDraft] = useState(() => t('modal.tryText'))
   const [message, setMessage] = useState<string | null>(null)
   const speakerChanged = speakerDraft !== savedSpeaker
   // Per-theme default rate, mirroring the speaker: the stored entry for this
@@ -606,12 +619,12 @@ function ProviderModal({
       if (res.result.ok) {
         setCredState(c => ({ ...c, [ref]: true }))
         setSavedPreview(p => ({ ...p, [ref]: maskRef(mask, text) }))
-        setMessage('已保存')
+        setMessage(t('modal.saved'))
         onRefresh()
       } else {
-        setMessage('保存失败，请重试')
+        setMessage(t('modal.saveFailed'))
       }
-    }).catch(() => setMessage('保存失败，请重试'))
+    }).catch(() => setMessage(t('modal.saveFailed')))
   }
 
   /** Auto-save a model/endpoint field on blur when it actually changed. */
@@ -620,14 +633,14 @@ function ProviderModal({
     const prev = String(value[field as keyof Required<VoiceSettings>] ?? '')
     if (next !== '' && next !== prev) {
       set(field, next)
-      setMessage('已保存')
+      setMessage(t('modal.saved'))
       onRefresh()
     }
   }
 
   const tryIt = (): void => {
     if (theme.id === 'system') {
-      trySystem(speakerDraft || value.voiceName, value.voiceLang, rateDraft)
+      trySystem(speakerDraft || value.voiceName, value.voiceLang, rateDraft, promptDraft)
       return
     }
     tryCloud(theme.id, speakerDraft, rateDraft, themeExtras(theme.id, {
@@ -635,22 +648,22 @@ function ProviderModal({
       qwenModel: fieldDraft.qwenModel ?? value.qwenModel,
       qwenEndpoint: fieldDraft.qwenEndpoint ?? value.qwenEndpoint,
       xfyunEndpoint: fieldDraft.xfyunEndpoint ?? value.xfyunEndpoint,
-    }), promptDraft)
+    }), promptDraft, t)
   }
 
   return (
     <div className='dsh-voice-modal-veil' onClick={onClose}>
       <div className='dsh-voice-modal' onClick={event => event.stopPropagation()}>
       <div className='dsh-voice-modal-head'>
-        <h4 className='dsh-voice-modal-title'>{variant?.title ?? theme.label.replace(/（.*?）/, '')}</h4>
-        <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label='关闭'>✕</button>
+        <h4 className='dsh-voice-modal-title'>{variant?.title ?? t(theme.labelKey)}</h4>
+        <button type='button' className='dsh-voice-modal-close' onClick={onClose} aria-label={t('modal.close')}>✕</button>
       </div>
       {(variant?.setupUrl ?? theme.setupUrl) !== undefined && (
         <p className='dsh-voice-setup-note'>
-          {variant?.note ?? theme.note} <a href={(variant?.setupUrl ?? theme.setupUrl)!} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>注册并获取密钥 ↗</a>
+          {variant?.note ?? (theme.noteKey !== undefined ? t(theme.noteKey) : '')} <a href={(variant?.setupUrl ?? theme.setupUrl)!} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>{t('modal.register')}</a>
         </p>
       )}
-      {(refs.length > 0 || fields.length > 0) && <div className='dsh-voice-modal-divider'>服务配置</div>}
+      {(refs.length > 0 || fields.length > 0) && <div className='dsh-voice-modal-divider'>{t('modal.serviceConfig')}</div>}
         {refs.map(({ ref, label, mask }) => (
           <label key={ref} className='dsh-voice-row'>
             <span className='dsh-voice-row-label'>{label}</span>
@@ -661,8 +674,8 @@ function ProviderModal({
                 placeholder={displayOf(ref) !== ''
                   ? ''
                   : credState[ref] === true
-                    ? (mask ? '••••••••' : '已保存')
-                    : (mask ? '粘贴密钥' : '输入 APPID')}
+                    ? (mask ? '••••••••' : t('modal.saved'))
+                    : (mask ? t('modal.placeholderSecret') : t('modal.placeholderAppId'))}
                 value={editing[ref] === true ? (draft[ref] ?? '') : displayOf(ref)}
                 onFocus={() => setEditing(e => ({ ...e, [ref]: true }))}
                 onChange={event => setDraft(d => ({ ...d, [ref]: event.target.value }))}
@@ -675,8 +688,8 @@ function ProviderModal({
         {fields.map(({ field, label, hint, placeholder }) => (
           <label key={field} className='dsh-voice-row'>
             <span className='dsh-voice-row-label'>
-              {label}
-              {hint !== undefined && <span className='dsh-voice-modal-hint'>（{hint}）</span>}
+              {t(label)}
+              {hint !== undefined && <span className='dsh-voice-modal-hint'>（{t(hint)}）</span>}
             </span>
             <input
               className='dsh-voice-input dsh-voice-input-wide'
@@ -689,15 +702,16 @@ function ProviderModal({
           </label>
         ))}
         {variant?.tryListen !== false && (<>
-        <div className='dsh-voice-modal-divider'>试听</div>
+        <div className='dsh-voice-modal-divider'>{t('modal.trySection')}</div>
         <label className='dsh-voice-row'>
-          <span className='dsh-voice-row-label'>音色</span>
+          <span className='dsh-voice-row-label'>{t('modal.speaker')}</span>
           <span className='dsh-voice-cred-cell'>
             <VoicePicker
               options={speakers}
               value={speakerDraft}
               defaultId={savedSpeaker}
-              ariaLabel='音色'
+              t={t}
+              ariaLabel={t('modal.speaker')}
               strategy='portal'
               onChange={setSpeakerDraft}
             />
@@ -708,32 +722,32 @@ function ProviderModal({
               onClick={() => {
                 set('speakerByTheme', { ...value.speakerByTheme, [theme.id]: speakerDraft })
                 onRefresh()
-                setMessage('已设为默认音色')
+                setMessage(t('modal.defaultVoiceSaved'))
               }}
             >
-              设为默认
+              {t('modal.setDefault')}
             </button>
           </span>
         </label>
         <label className='dsh-voice-row'>
-          <span className='dsh-voice-row-label'>语速</span>
+          <span className='dsh-voice-row-label'>{t('modal.rate')}</span>
           <span className='dsh-voice-cred-cell'>
-            <RateMagnetSlider rate={rateDraft} onChange={setRateDraft} />
+            <RateMagnetSlider rate={rateDraft} onChange={setRateDraft} t={t} />
             <button
               type='button'
               className='dsh-voice-provider-btn'
               disabled={!rateChanged}
               onClick={() => {
                 set('rateByTheme', { ...value.rateByTheme, [theme.id]: rateDraft })
-                setMessage('已设为默认语速')
+                setMessage(t('modal.defaultRateSaved'))
               }}
             >
-              设为默认
+              {t('modal.setDefault')}
             </button>
           </span>
         </label>
         <label className='dsh-voice-row dsh-voice-row-top'>
-          <span className='dsh-voice-row-label'>试听提示词</span>
+          <span className='dsh-voice-row-label'>{t('modal.prompt')}</span>
           <textarea
             className='dsh-voice-input dsh-voice-input-wide dsh-voice-input-area'
             rows={3}
@@ -742,12 +756,12 @@ function ProviderModal({
           />
         </label>
         <div className='dsh-voice-try-row'>
-          <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>试听</button>
+          <button type='button' className='dsh-voice-provider-btn is-primary' onClick={tryIt}>{t('modal.try')}</button>
         </div>
         </>)}
         <div className='dsh-voice-modal-footer'>
           {message !== null && <span className='dsh-voice-setup-ok'>{message}</span>}
-          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>完成</button>
+          <button type='button' className='dsh-voice-provider-btn' onClick={onClose}>{t('modal.done')}</button>
         </div>
       </div>
     </div>
@@ -755,7 +769,7 @@ function ProviderModal({
 }
 
 /** Render the voice settings card. */
-export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardProps): ReactElement {
+export function VoiceSettingsCard({ useVoiceCard, set, credentials, t }: VoiceCardProps): ReactElement {
   const status = useVoiceCard(s => s.status)
   const value = useVoiceCard(s => s.value)
   const writable = useVoiceCard(s => s.writable)
@@ -789,28 +803,28 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
   if (status !== 'ready') {
     return (
       <div className='dsh-voice-card'>
-        <h3 className='dsh-voice-card-title'>语音对话</h3>
-        <p className='dsh-voice-card-empty'>{status === 'loading' ? '读取设置中…' : '设置不可用（内存模式）'}</p>
+        <h3 className='dsh-voice-card-title'>{t('card.title')}</h3>
+        <p className='dsh-voice-card-empty'>{status === 'loading' ? t('card.loading') : t('card.unavailable')}</p>
       </div>
     )
   }
   return (
     <div className='dsh-voice-card'>
-      <h3 className='dsh-voice-card-title'>语音对话</h3>
+      <h3 className='dsh-voice-card-title'>{t('card.title')}</h3>
       <div className='dsh-voice-panel'>
         <div className='dsh-voice-panel-sec'>
-          <div className='dsh-voice-panel-title'>基础设置</div>
-          <Toggle label='说话打断播报' hint={value.allowInterrupt ? '说话即可打断播报，播报回音自动滤除' : undefined}
+          <div className='dsh-voice-panel-title'>{t('card.basic')}</div>
+          <Toggle label={t('card.bargeIn')} hint={value.allowInterrupt ? t('card.bargeInHint') : undefined}
             on={value.allowInterrupt} disabled={disabled}
             onChange={next => { set('allowInterrupt', next) }} />
-          <Field label='停顿多久自动发送（秒）' value={String(value.silenceTimeout)} placeholder='默认 2' disabled={disabled}
+          <Field label={t('card.silence')} value={String(value.silenceTimeout)} placeholder={t('card.silencePlaceholder')} disabled={disabled}
             onCommit={next => { const n = Number(next); if (Number.isFinite(n)) set('silenceTimeout', Math.min(6, Math.max(0.4, n))) }} />
         </div>
 
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
 
         <div className='dsh-voice-panel-sec'>
-          <div className='dsh-voice-panel-title'>声纹效果</div>
+          <div className='dsh-voice-panel-title'>{t('card.wave')}</div>
           <div className='dsh-voice-print-grid'>
             {WAVE_PRINTS.map(print => (
               <button key={print.id} type='button'
@@ -826,7 +840,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
 
         <div className='dsh-voice-panel-sec'>
-          <div className='dsh-voice-panel-title'>说 · 音色引擎</div>
+          <div className='dsh-voice-panel-title'>{t('card.speak')}</div>
           {listVoiceThemes().map(theme => (
             <EngineRow
               key={theme.id}
@@ -837,6 +851,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
               refreshKey={voicesTick}
               onActivate={() => { if (!disabled) set('ttsTheme', theme.id) }}
               onRefresh={() => { configuredCache.clear(); tickVoices(n => n + 1) }}
+              t={t}
             />
           ))}
         </div>
@@ -844,7 +859,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
         <div className='dsh-voice-panel-sep' aria-hidden='true' />
 
         <div className='dsh-voice-panel-sec'>
-          <div className='dsh-voice-panel-title'>听 · 语音识别</div>
+          <div className='dsh-voice-panel-title'>{t('card.hear')}</div>
           {ASR_ENGINES.map(engine => (
             <AsrRow
               key={engine.id}
@@ -856,6 +871,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials }: VoiceCardP
               disabled={disabled}
               onActivate={() => { if (!disabled) set('asrTheme', engine.id) }}
               onRefresh={() => { configuredCache.clear(); tickVoices(n => n + 1) }}
+              t={t}
             />
           ))}
         </div>
