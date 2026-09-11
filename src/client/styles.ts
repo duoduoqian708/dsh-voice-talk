@@ -256,6 +256,10 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 /* ---- left: the call face (half the stage; full stage when collapsed) ---- */
 .dsh-voice-left {
   position: relative; z-index: 1;
+  /* Query container for the controls row: its stacking decision keys off the
+     TILE's own width, so a squeezed pane (phone split, a future custom split
+     ratio) stacks while a wide one keeps the row — no device/viewport logic. */
+  container-type: inline-size;
   flex: 1 1 0; min-width: 0;
   display: flex; flex-direction: column; align-items: center;
   padding: 20px 20px 24px;
@@ -404,6 +408,9 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   margin-top: auto;
   width: 100%; max-width: 620px;
   display: flex; align-items: center; justify-content: space-between;
+  /* Fallback wrapping: even without container-query support the three can
+     never overlap or squeeze — they drop onto a new line instead. */
+  flex-wrap: wrap;
   gap: 28px;
 }
 /* every control is reachable (the old sheet only re-enabled buttons) */
@@ -411,7 +418,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-controls input { pointer-events: auto; }
 
 /* speaker: custom dropdown — a fixed-height popup scrolls inside, opens up */
-.dsh-voice-speaker { position: relative; min-width: 0; }
+.dsh-voice-speaker { position: relative; min-width: 0; flex: none; }
 .dsh-voice-speaker-btn {
   display: inline-flex; align-items: center; gap: 8px;
   height: 52px; padding: 0 18px; max-width: 220px;
@@ -465,6 +472,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 }
 .dsh-voice-rate-control {
   display: inline-flex; align-items: center; gap: 12px;
+  flex: none;
   height: 52px; padding: 0 18px;
   border-radius: 16px;
   background: rgba(255, 255, 255, .92);
@@ -804,6 +812,17 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   .dsh-voice-duration { margin-top: 12px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
   .dsh-voice-stream { padding: 20px 14px 24px; }
+}
+
+/* Cramped tile (half a narrow phone, or any pane squeezed below the three
+   controls' comfortable envelope — ~620px): stack them into one centered
+   column, each pill at its natural width, with breathing room between rows.
+   Keys off the TILE width (container query), never the device. */
+@container (max-width: 620px) {
+  .dsh-voice-controls {
+    flex-direction: column;
+    row-gap: 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
