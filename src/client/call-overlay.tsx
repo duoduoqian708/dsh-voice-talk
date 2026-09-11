@@ -490,6 +490,8 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
   // most a slice of the transcript mounted.
   const streamRef = useRef<HTMLDivElement | null>(null)
   const followRef = useRef(true)
+  const liveRef = useRef<HTMLDivElement | null>(null)
+  const liveFollowRef = useRef(true)
   const [following, setFollowing] = useState(true)
   const [windowStart, setWindowStart] = useState<number | null>(null)
   const lastTopRef = useRef(0)
@@ -533,6 +535,20 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
     anchorRef.current = null
     el.scrollTop = anchor.top + (el.scrollHeight - anchor.height)
   }, [start])
+
+  // Live transcript follow: keep the newest line in view while text streams
+  // (a long dictation outgrows the box); scrolling up pauses the follow until
+  // the user returns to the bottom.
+  useEffect(() => {
+    const el = liveRef.current
+    if (el !== null && liveFollowRef.current) el.scrollTop = el.scrollHeight
+  }, [interim])
+
+  const onLiveScroll = (): void => {
+    const el = liveRef.current
+    if (el === null) return
+    liveFollowRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8
+  }
 
   const onStreamScroll = (): void => {
     const el = streamRef.current
@@ -589,7 +605,9 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
           {error !== null && <div className='dsh-voice-live-error'>{error}</div>}
           {setupMissing && <div className='dsh-voice-live-warn'>该引擎尚未配置凭证 — 到设置页完成接入，或切回系统语音</div>}
           {pendingCount > 0 && <div className='dsh-voice-live-warn'>{pendingCount} 项待确认 — 请语音回答</div>}
-          {phase === 'listening' && !micMuted && interim !== '' && <div className='dsh-voice-live-interim'>{interim}</div>}
+          {phase === 'listening' && !micMuted && interim !== '' && (
+            <div className='dsh-voice-live-interim' ref={liveRef} onScroll={onLiveScroll}>{interim}</div>
+          )}
         </div>
 
         <div className='dsh-voice-controls'>

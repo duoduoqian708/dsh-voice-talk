@@ -481,7 +481,7 @@ body[data-ds-dark-theme] .dsh-voice-modal-divider::after { background: var(--dsw
   text-align: center; padding: 0 4px;
 }
 .dsh-voice-live > div {
-  max-height: 44px; overflow-y: auto; width: 100%;
+  max-height: clamp(44px, 18vh, 132px); overflow-y: auto; width: 100%;
   font-size: 15px; line-height: 1.5;
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
 }
