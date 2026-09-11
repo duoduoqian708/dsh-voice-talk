@@ -22,7 +22,7 @@ import { isStopCommand, looksLikeEcho, normalizeForEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
-import type { TranscriptMessage, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
+import type { QuestionAnswerView, QuestionItemView, QuestionOptionView, TranscriptMessage, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 
 /** Shortest finalized utterance worth submitting (filters breaths and noise). */
 const MIN_UTTERANCE_CHARS = 2
@@ -203,17 +203,106 @@ function nodeText(blocks: readonly { kind?: string; type?: string; text?: string
 /** Tool result preview cap — result bodies can dwarf the whole stream. */
 const RESULT_PREVIEW_CHARS = 240
 
-/** Block mirror of one assistant step (reasoning / prose / tool calls). */
+/**
+ * Questions protocol views from a tool-call args payload, or null when the
+ * args do not speak it. Shape-detected (any tool whose args carry a non-empty
+ * `questions` array of {question, options?} items), so every current and
+ * future asker renders through the same card; the shape check runs on the raw
+ * string first so unrelated tool calls never pay a JSON.parse.
+ */
+function questionsFromArgs(raw: string): QuestionItemView[] | null {
+  if (!raw.includes('"questions"')) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return null }
+  const list = (parsed as { questions?: unknown } | null)?.questions
+  if (!Array.isArray(list) || list.length === 0) return null
+  const out: QuestionItemView[] = []
+  for (const [index, item] of list.entries()) {
+    if (item === null || typeof item !== 'object') return null
+    const rawItem = item as Record<string, unknown>
+    const question = rawItem.question
+    if (typeof question !== 'string' || question === '') return null
+    const options: QuestionOptionView[] = []
+    if (Array.isArray(rawItem.options)) {
+      for (const option of rawItem.options) {
+        if (option === null || typeof option !== 'object') return null
+        const rawOption = option as Record<string, unknown>
+        const label = rawOption.label
+        if (typeof label !== 'string' || label === '') return null
+        options.push({
+          label,
+          description: typeof rawOption.description === 'string' ? rawOption.description : '',
+        })
+      }
+    }
+    const intent = rawItem.intent === null || typeof rawItem.intent !== 'object'
+      ? null
+      : rawItem.intent as Record<string, unknown>
+    out.push({
+      id: typeof rawItem.id === 'string' && rawItem.id !== '' ? rawItem.id : `q${index + 1}`,
+      header: typeof rawItem.header === 'string' ? rawItem.header : '',
+      question,
+      detail: typeof rawItem.detail === 'string' ? rawItem.detail : '',
+      multiSelect: rawItem.multi_select === true || rawItem.multiSelect === true,
+      options,
+      approve: intent !== null && intent.kind === 'plan-review' && typeof intent.approve === 'string' ? intent.approve : null,
+    })
+  }
+  return out
+}
+
+/** Answers from a tool-result text payload, or null when it is not the
+ *  questions-protocol answer shape. */
+function answersFromResult(text: string): QuestionAnswerView[] | null {
+  if (!text.includes('"answers"')) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return null }
+  const list = (parsed as { answers?: unknown } | null)?.answers
+  if (!Array.isArray(list) || list.length === 0) return null
+  const out: QuestionAnswerView[] = []
+  for (const item of list) {
+    if (item === null || typeof item !== 'object') return null
+    const rawItem = item as Record<string, unknown>
+    if (typeof rawItem.id !== 'string') return null
+    out.push({
+      id: rawItem.id,
+      selected: Array.isArray(rawItem.selected)
+        ? rawItem.selected.filter((label): label is string => typeof label === 'string')
+        : [],
+      custom: typeof rawItem.custom === 'string' ? rawItem.custom : '',
+    })
+  }
+  return out
+}
+
+/** Index of the open question segment a tool result settles (callId match,
+ *  else the last answer-less one), or -1 when the result is not a question's. */
+function openQuestionIndex(segments: readonly TranscriptSegment[], callId: string): number {
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const segment = segments[i]!
+    if (segment.kind !== 'question' || segment.answers !== null || segment.error !== '') continue
+    if (callId === '' || segment.callId === '' || segment.callId === callId) return i
+  }
+  return -1
+}
+
+/** Block mirror of one assistant step (reasoning / prose / tool calls /
+ *  questions-protocol asks). */
 function segmentsOfBlocks(blocks: readonly unknown[]): TranscriptSegment[] {
   const out: TranscriptSegment[] = []
   for (const block of blocks) {
-    const candidate = block as { kind?: string; text?: string; name?: string; argsRaw?: string }
+    const candidate = block as { kind?: string; text?: string; name?: string; argsRaw?: string; callId?: string }
     if (candidate.kind === 'text' && candidate.text !== undefined && candidate.text !== '') {
       out.push({ kind: 'text', text: candidate.text })
     } else if (candidate.kind === 'reasoning' && candidate.text !== undefined && candidate.text !== '') {
       out.push({ kind: 'reasoning', text: candidate.text })
     } else if (candidate.kind === 'tool-call' && candidate.name !== undefined && candidate.name !== '') {
-      out.push({ kind: 'tool-call', name: candidate.name, args: candidate.argsRaw ?? '' })
+      const questions = questionsFromArgs(candidate.argsRaw ?? '')
+      if (questions !== null) {
+        out.push({ kind: 'question', callId: candidate.callId ?? '', questions, answers: null, error: '' })
+      } else {
+        out.push({ kind: 'tool-call', name: candidate.name, args: candidate.argsRaw ?? '' })
+      }
     }
   }
   return out
@@ -233,6 +322,12 @@ function sameSegment(a: TranscriptSegment, b: TranscriptSegment): boolean {
   if (a.kind === 'tool-call') {
     const other = b as typeof a
     return a.name === other.name && a.args === other.args
+  }
+  if (a.kind === 'question') {
+    const other = b as typeof a
+    return a.callId === other.callId && a.error === other.error
+      && JSON.stringify(a.questions) === JSON.stringify(other.questions)
+      && JSON.stringify(a.answers) === JSON.stringify(other.answers)
   }
   const other = b as typeof a
   return a.name === other.name && a.ok === other.ok && a.text === other.text
@@ -283,12 +378,24 @@ export function transcriptOf(snapshot: ConversationSnapshot, prev?: TranscriptSt
       }
     } else if (node.kind === 'tool-result') {
       // A result pairs with its call head (seq order guarantees the
-      // pairing); surface it as a segment on the turn it belongs to.
+      // pairing); surface it as a segment on the turn it belongs to. A
+      // questions-protocol result settles its card instead of adding a row.
       const name = node.call?.name ?? node.callId
       const last = candidate[candidate.length - 1]
-      if (name !== '' && last !== undefined && last.role === 'assistant') {
-        const segment: TranscriptSegment = { kind: 'tool-result', name, ok: !node.isError, text: resultText(node.content as readonly unknown[]) }
-        candidate[candidate.length - 1] = { ...last, segments: [...last.segments, segment] }
+      if (last !== undefined && last.role === 'assistant') {
+        const at = openQuestionIndex(last.segments, node.callId)
+        if (at >= 0) {
+          const segment = last.segments[at] as Extract<TranscriptSegment, { kind: 'question' }>
+          const text = nodeText(node.content as readonly { kind?: string; type?: string; text?: string }[])
+          const answers = node.isError ? null : answersFromResult(text)
+          const error = answers !== null ? '' : (node.isError ? '已取消' : '未收到答案')
+          const segments = [...last.segments]
+          segments[at] = { ...segment, answers, error }
+          candidate[candidate.length - 1] = { ...last, segments }
+        } else if (name !== '') {
+          const segment: TranscriptSegment = { kind: 'tool-result', name, ok: !node.isError, text: resultText(node.content as readonly unknown[]) }
+          candidate[candidate.length - 1] = { ...last, segments: [...last.segments, segment] }
+        }
       }
     }
   }

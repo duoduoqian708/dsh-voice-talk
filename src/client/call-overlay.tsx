@@ -14,7 +14,7 @@
 import { createPortal } from 'react-dom'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactElement } from 'react'
-import type { TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
+import type { QuestionAnswerView, QuestionItemView, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 import type { ObservableSource } from './store.ts'
 import { CallBreath } from './voice-wave.ts'
 import { WavePrint } from './wave-print.ts'
@@ -274,6 +274,63 @@ const ToolCard = memo(function ToolCard({ name, args, ok, text, running }: {
   )
 })
 
+/**
+ * One question interaction (the questions-protocol card: ask_user_question
+ * and anything else that speaks the same args/result shape). Display-only —
+ * the voice loop answers; the card mirrors the ask, then the chosen labels.
+ * Unsettled asks read as pending; an unparsable/error result reads as a note.
+ */
+const QuestionCard = memo(function QuestionCard({ questions, answers, error }: {
+  questions: readonly QuestionItemView[]
+  answers: readonly QuestionAnswerView[] | null
+  error: string
+}): ReactElement {
+  return (
+    <div className='dsh-voice-question' data-settled={answers !== null || error !== ''}>
+      <div className='dsh-voice-question-head'>
+        <span className='dsh-voice-question-badge'>需要你的回答</span>
+        {answers === null && error === '' && <span className='dsh-voice-question-wait'>等待回答…</span>}
+        {error !== '' && <span className='dsh-voice-question-error'>{error}</span>}
+      </div>
+      {questions.map((question, qi) => {
+        const answer = answers?.find(item => item.id === question.id)
+        const chosen = answer?.selected ?? []
+        return (
+          <div className='dsh-voice-question-item' key={`${qi}:${question.id}`}>
+            {question.header !== '' && <div className='dsh-voice-question-header'>{question.header}</div>}
+            <div className='dsh-voice-question-text'>{question.question}</div>
+            {question.detail !== '' && <div className='dsh-voice-question-detail'>{question.detail}</div>}
+            {question.options.length > 0
+              ? (
+                <ul className='dsh-voice-question-options'>
+                  {question.options.map(option => {
+                    const picked = chosen.includes(option.label)
+                    return (
+                      <li className='dsh-voice-question-option' data-picked={picked} key={option.label}>
+                        <span className='dsh-voice-question-mark' aria-hidden='true'>{picked ? '✓' : '○'}</span>
+                        <span className='dsh-voice-question-label'>{option.label}</span>
+                        {option.description !== '' && <span className='dsh-voice-question-desc'>{option.description}</span>}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )
+              : <div className='dsh-voice-question-free'>{question.multiSelect ? '可多选' : '自由回答'}</div>}
+            {answer !== undefined && (
+              <div className='dsh-voice-question-picked'>
+                {chosen.length > 0 && `已选择：${chosen.join('、')}`}
+                {chosen.length > 0 && answer.custom !== '' && '；'}
+                {answer.custom !== '' && `已输入：${answer.custom}`}
+                {chosen.length === 0 && answer.custom === '' && '已跳过'}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+})
+
 /** Segments of one assistant message (or the live streaming bubble).
  *  Text segments render through the markdown engine; the karaoke mark is a
  *  raw offset into the message's JOINED prose (text segments joined with
@@ -286,6 +343,7 @@ function SegmentList({ segments, mark }: { segments: readonly TranscriptSegment[
     <>
       {segments.map((segment, i) => {
         if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
+        if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} />
         if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} />
         if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
         const start = acc
@@ -583,6 +641,7 @@ export function CallOverlay({ useVoice, transcript, hangUp, toggleMute, stopSpea
               <div className='dsh-voice-msg-body'>
                 {streaming.map((segment, i) => {
                   if (segment.kind === 'reasoning') return <ReasoningSection key={i} text={segment.text} />
+                  if (segment.kind === 'question') return <QuestionCard key={i} questions={segment.questions} answers={segment.answers} error={segment.error} />
                   if (segment.kind === 'tool-call') return <ToolCard key={i} name={segment.name} args={segment.args} running />
                   if (segment.kind === 'tool-result') return <ToolCard key={i} name={segment.name} ok={segment.ok} text={segment.text} />
                   // The caret rides the last live text run (streaming markdown
