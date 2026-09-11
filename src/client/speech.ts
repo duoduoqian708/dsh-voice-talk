@@ -25,6 +25,8 @@ export interface RecognitionEvents {
   /** A recognition failure; `fatal` means retrying cannot help (denied, unsupported).
    *  `code` carries a stable host-bridge code when the failure came from one. */
   onError(message: string, fatal: boolean, code?: string): void
+  /** Diagnostic trace channel (TEMP): audio/transport milestones. */
+  onTrace?(event: string, detail?: Record<string, unknown>): void
 }
 
 /** Continuous speech recognition handle. Chrome/Edge only in practice. */

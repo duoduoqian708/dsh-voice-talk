@@ -26,6 +26,26 @@ export type AsrVendor = 'qwen' | 'xfyun'
 const CHUNK_SAMPLES = 640
 const RECONNECT_BASE_MS = 250
 const RECONNECT_MAX_MS = 4_000
+/** First link-up watchdog: `ready` must arrive within this window. */
+const READY_TIMEOUT_MS = 10_000
+/** Consecutive unexpected closes before the failure turns fatal (silence → error). */
+const MAX_RECONNECT_FAILURES = 3
+/** Audio-startup waits are bounded: a pending browser API must not hang the
+ *  whole recognizer into silent no-capture (the classic dead-mic report). */
+const MIC_TIMEOUT_MS = 8_000
+const RESUME_TIMEOUT_MS = 3_000
+const WORKLET_TIMEOUT_MS = 5_000
+
+/** Bound an await; rejection carries the label so the notice stays actionable. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout`)), ms)
+    promise.then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
+    )
+  })
+}
 
 /** The worklet: streaming linear resample to 16k + int16 chunking. */
 const WORKLET_SRC = `
@@ -94,6 +114,9 @@ export class CloudRecognizer implements Recognizer {
     let restartTimer: ReturnType<typeof setTimeout> | null = null
     let socket: WebSocket | null = null
     let ready = false
+    let readyTimer: ReturnType<typeof setTimeout> | null = null
+    let failures = 0
+    let tracedPcm = false
     const pending: ArrayBuffer[] = []
     let stream: MediaStream | null = null
     let audioCtx: AudioContext | null = null
@@ -142,6 +165,9 @@ export class CloudRecognizer implements Recognizer {
       }
       if (event.type === 'ready') {
         ready = true
+        failures = 0
+        if (readyTimer !== null) { clearTimeout(readyTimer); readyTimer = null }
+        events.onTrace?.('asr-ready', {})
         // Every successful session resets the backoff — iFlytek's per-utterance
         // rotation must not let the reconnect delay creep toward its max.
         restartAttempt = 0
@@ -166,6 +192,7 @@ export class CloudRecognizer implements Recognizer {
         disposed = true
         releaseMic()
         closeSocket()
+        events.onTrace?.('asr-error', { code: event.code })
         events.onError(event.error ?? this.#t('err.asrFailed'), true, event.code)
       }
     }
@@ -174,6 +201,7 @@ export class CloudRecognizer implements Recognizer {
       const ws = new WebSocket(bridgeUrl())
       socket = ws
       ws.onopen = () => {
+        events.onTrace?.('asr-ws-open', {})
         ws.send(hello)
       }
       ws.onmessage = event => {
@@ -186,50 +214,87 @@ export class CloudRecognizer implements Recognizer {
         // Unexpected drop (network blip): re-arm with backoff, mic stays.
         // Nothing can arrive while the link is down, so surface it: the loop
         // must not read the event gap as the user pausing.
+        failures += 1
+        events.onTrace?.('asr-ws-close', { failures })
         events.onLink?.(false)
+        if (failures >= MAX_RECONNECT_FAILURES) {
+          // Retrying no longer helps and silent backoff would look like a dead
+          // mic: surface the failure instead of looping forever.
+          disposed = true
+          if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null }
+          releaseMic()
+          events.onError(this.#t('err.asrUnreachable'), true)
+          return
+        }
         restarting = true
         const delay = Math.min(RECONNECT_BASE_MS * 2 ** restartAttempt, RECONNECT_MAX_MS)
         restartAttempt += 1
+        events.onTrace?.('asr-reconnect', { attempt: restartAttempt, delay })
         restartTimer = setTimeout(() => {
           restarting = false
           restartTimer = null
           if (!disposed) openSocket()
         }, delay)
       }
-      ws.onerror = () => { /* the close event follows */ }
+      ws.onerror = () => { events.onTrace?.('asr-ws-error', {}) }
     }
 
     const attachMic = async (): Promise<void> => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        stream = await withTimeout(navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        })
+        }), MIC_TIMEOUT_MS, 'getUserMedia')
         const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
         if (Ctx === undefined) throw new Error('no AudioContext')
         audioCtx = new Ctx()
-        if (audioCtx.state === 'suspended') await audioCtx.resume()
+        if (audioCtx.state === 'suspended') await withTimeout(audioCtx.resume(), RESUME_TIMEOUT_MS, 'AudioContext.resume')
+        if (audioCtx.state !== 'running') {
+          // A suspended context runs no worklet callbacks: zero PCM, zero
+          // errors, zero text. Fail loud instead of looking like a dead mic.
+          events.onTrace?.('asr-audio-suspended', { state: audioCtx.state })
+          releaseMic()
+          events.onError(this.#t('err.asrAudio'), true)
+          return
+        }
         const blobUrl = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'text/javascript' }))
-        await audioCtx.audioWorklet.addModule(blobUrl)
+        await withTimeout(audioCtx.audioWorklet.addModule(blobUrl), WORKLET_TIMEOUT_MS, 'audioWorklet.addModule')
         URL.revokeObjectURL(blobUrl)
         const source = audioCtx.createMediaStreamSource(stream)
         const tap = new AudioWorkletNode(audioCtx, 'asr-tap')
         tap.port.onmessage = (event: MessageEvent): void => {
           const payload = event.data as { pcm?: ArrayBuffer; rms?: number }
           if (typeof payload.rms === 'number') events.onLevel?.(payload.rms)
-          if (payload.pcm instanceof ArrayBuffer) sendChunk(payload.pcm)
+          if (payload.pcm instanceof ArrayBuffer) {
+            if (!tracedPcm) { tracedPcm = true; events.onTrace?.('asr-pcm', {}) }
+            sendChunk(payload.pcm)
+          }
         }
         source.connect(tap)
-      } catch {
-        events.onError(this.#t('err.micDenied'), true)
+        events.onTrace?.('asr-mic', { state: audioCtx.state })
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        events.onTrace?.('asr-mic-fail', { detail })
+        events.onError(detail === '' ? this.#t('err.micDenied') : `${this.#t('err.micDenied')}（${detail}）`, true)
       }
     }
 
     void attachMic()
     openSocket()
+    readyTimer = setTimeout(() => {
+      readyTimer = null
+      if (disposed || ready) return
+      disposed = true
+      if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null }
+      releaseMic()
+      closeSocket()
+      events.onTrace?.('asr-ready-timeout', {})
+      events.onError(this.#t('err.asrNoLink'), true)
+    }, READY_TIMEOUT_MS)
 
     return {
       stop: () => {
         disposed = true
+        if (readyTimer !== null) { clearTimeout(readyTimer); readyTimer = null }
         if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null }
         restarting = false
         releaseMic()

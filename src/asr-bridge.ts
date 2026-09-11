@@ -372,9 +372,17 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
   let upstream: AsrUpstream | null = null
   let closed = false
   let idleTimer: ReturnType<typeof setTimeout> | null = null
+  /** TEMP diagnostic trace: shows up in the dsh web log as [voice-asr-trace]. */
+  const trace = (...parts: unknown[]): void => console.log('[voice-asr-trace]', vendor, ...parts)
+  let tracedFirst = false
+  const firstTrace = (kind: string): void => {
+    if (tracedFirst) return
+    tracedFirst = true
+    trace('upstream-first', kind)
+  }
   const bumpIdle = (): void => {
     if (idleTimer !== null) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => tearDown(), IDLE_TIMEOUT_MS)
+    idleTimer = setTimeout(() => { trace('idle-teardown'); tearDown() }, IDLE_TIMEOUT_MS)
   }
   const sendJson = (payload: Record<string, unknown>): void => {
     if (closed) return
@@ -393,17 +401,19 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
    *  connection per utterance: after its final, the bridge drops the browser
    *  link so the browser's reconnect lands on a fresh upstream session. */
   const upstreamOut = {
-    onPartial: (text: string): void => { if (text !== '') sendJson({ type: 'interim', text }) },
+    onPartial: (text: string): void => { firstTrace('interim'); if (text !== '') sendJson({ type: 'interim', text }) },
     onFinal: (text: string): void => {
+      firstTrace('final')
       sendJson({ type: 'final', text })
       if (vendor === 'xfyun') tearDown()
     },
-    onActivity: (): void => { sendJson({ type: 'activity' }) },
+    onActivity: (): void => { firstTrace('activity'); sendJson({ type: 'activity' }) },
     onError: (message: string): void => {
+      trace('upstream-error', message)
       sendJson({ type: 'error', error: message })
       tearDown()
     },
-    onClosed: () => tearDown(),
+    onClosed: () => { trace('upstream-closed'); tearDown() },
   }
   ws.on('close', () => tearDown())
   ws.on('error', () => tearDown())
@@ -423,6 +433,7 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
         void (async () => {
           try {
             const lang = asrLanguage(frame.lang)
+            trace('hello', { lang, model: frame.model })
             upstream = vendor === 'qwen'
               ? await openQwenUpstream(await resolveApiKey(ctx), {
                 lang,
@@ -430,9 +441,11 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
                 endpoint: frame.endpoint,
               }, upstreamOut)
               : await openXfyunUpstream(ctx, lang, frame.endpoint, upstreamOut)
+            trace('ready')
             sendJson({ type: 'ready' })
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
+            trace('hello-fail', message)
             console.error('[voice-asr] hello 失败:', vendor, message)
             // Send past the closed-guard: the upstream close event can race the
             // rejection here, and the browser must still learn WHY it failed.

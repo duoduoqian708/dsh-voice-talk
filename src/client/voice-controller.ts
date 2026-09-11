@@ -704,6 +704,7 @@ export class VoiceController {
         this.#utt.level(rms)
       },
       onLink: up => this.#onLink(up),
+      onTrace: (event, detail) => this.#trace(event, detail),
       onFinal: text => this.#onFinalUtterance(text),
       onEnd: () => { /* the recognizer reconnects itself */ },
       onError: (message, fatal, code) => {
