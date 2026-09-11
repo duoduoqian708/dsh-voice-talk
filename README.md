@@ -28,6 +28,16 @@ DeepSeek Harness Web 的语音对话插件：点一下麦克风，全屏通话�
 
 前提：dsh ≥ 0.1.0-rc.7（web profile）、Chrome / Edge、麦克风。
 
+### 从 npm 安装（推荐）
+
+```sh
+dsh plugin --profile web add dsh-voice-talk
+```
+
+装完重启 `dsh web`。
+
+### 从源码安装（开发）
+
 ```sh
 git clone https://github.com/duoduoqian708/dsh-voice-talk.git
 cd dsh-voice-talk && npm install && npm run build
