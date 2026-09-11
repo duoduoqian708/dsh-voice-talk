@@ -732,10 +732,11 @@ function ProviderModal({
             </button>
           </span>
         </label>
-        <label className='dsh-voice-row'>
+        <label className='dsh-voice-row dsh-voice-row-top'>
           <span className='dsh-voice-row-label'>试听提示词</span>
-          <input
-            className='dsh-voice-input dsh-voice-input-wide'
+          <textarea
+            className='dsh-voice-input dsh-voice-input-wide dsh-voice-input-area'
+            rows={3}
             value={promptDraft}
             onChange={event => setPromptDraft(event.target.value)}
           />

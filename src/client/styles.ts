@@ -171,6 +171,14 @@ const CSS = `
 .dsh-voice-modal-footer { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .dsh-voice-modal-footer .dsh-voice-provider-btn { margin-left: auto; }
 .dsh-voice-input-wide { flex: 1; max-width: none; min-width: 0; }
+/* multi-line try-listen prompt: same skin, room for the full sentence */
+.dsh-voice-input-area {
+  height: auto; min-height: 56px; padding: 8px 10px;
+  line-height: 1.5; font: inherit; resize: vertical;
+}
+/* the label rides the first text line instead of the box's middle */
+.dsh-voice-row-top { align-items: flex-start; }
+.dsh-voice-row-top .dsh-voice-row-label { padding-top: 9px; }
 .dsh-voice-modal .dsh-voice-row-label { flex: none; min-width: 0; width: 84px; text-align: left; opacity: .75; }
 .dsh-voice-cred-cell { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 /* the audition button sits right under the try-listen prompt row */
