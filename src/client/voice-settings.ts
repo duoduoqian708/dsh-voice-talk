@@ -35,7 +35,7 @@ export interface VoiceSettings {
 
 /** Defaults matching the host schema, applied when a field is absent. */
 export const VOICE_DEFAULTS: Required<VoiceSettings> = {
-  allowInterrupt: true,
+  allowInterrupt: false,
   silenceTimeout: 2,
   rate: 1,
   voiceLang: 'zh-CN',
