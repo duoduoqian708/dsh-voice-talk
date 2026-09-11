@@ -18,6 +18,8 @@ const BARS = 19
 const BREATH_PERIOD_S = 3.6
 /** Amplitude smoothing factor per frame (heavy: no jitter, slow bloom). */
 const AMP_SMOOTH = 0.06
+/** Visual zoom of the bar row; the bar math below stays in 6px-base units. */
+const BAR_SCALE = 1.25
 
 /** Breath targets (refs into the overlay DOM). */
 export interface BreathTargets {
@@ -209,7 +211,7 @@ export class CallBreath {
           heightPx = 5
       }
       // Base bar height is 6px; scaleY keeps the transform GPU-only.
-      this.#bars[i]!.style.transform = `scaleY(${(heightPx / 6).toFixed(3)})`
+      this.#bars[i]!.style.transform = `scaleY(${((heightPx / 6) * BAR_SCALE).toFixed(3)})`
     }
   }
 

@@ -291,32 +291,32 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
    own auto margin, so the cluster centers while duration stays on top */
 .dsh-voice-hero {
   display: flex; align-items: center; justify-content: center;
-  gap: 18px; width: 100%; margin-top: auto; flex: none;
+  gap: 22px; width: 100%; margin-top: auto; flex: none;
 }
 .dsh-voice-avatar-wrap {
-  position: relative; width: 84px; height: 84px;
+  position: relative; width: 102px; height: 102px;
   display: grid; place-items: center; flex: none;
 }
 .dsh-voice-avatar-circle {
-  width: 72px; height: 72px; border-radius: 50%;
+  width: 90px; height: 90px; border-radius: 50%;
   display: grid; place-items: center;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, .08);
   box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
   color: #1D1D1F;
 }
-.dsh-voice-whale { width: 38px; height: auto; display: block; will-change: transform; }
+.dsh-voice-whale { width: 46px; height: auto; display: block; will-change: transform; }
 
 /* signature element: voice-memos waveform (ink, round-capped bars) */
 .dsh-voice-wave {
-  flex: 1 1 auto; min-width: 120px; max-width: 320px;
+  flex: 1 1 auto; min-width: 140px; max-width: 400px;
   display: flex; align-items: center; justify-content: space-between;
-  gap: 4px; height: 56px; margin: 0;
+  gap: 5px; height: 70px; margin: 0;
 }
 /* voice-print lottie fills the slot (slice crops the comp's empty bands) */
 .dsh-voice-wave > svg { width: 100%; height: 100%; }
 .dsh-voice-wave-bar {
-  width: 4px; height: 6px; border-radius: 2px;
+  width: 5px; height: 6px; border-radius: 2.5px;
   background: #1D1D1F; opacity: .85;
   will-change: transform;
 }
@@ -327,7 +327,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-mic-wrap { position: relative; flex: none; display: grid; place-items: center; }
 .dsh-voice-mickey {
   position: relative; z-index: 1;
-  width: 72px; height: 72px; border-radius: 50%; cursor: pointer;
+  width: 90px; height: 90px; border-radius: 50%; cursor: pointer;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, .08);
   color: #1D1D1F;
@@ -519,16 +519,16 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 .dsh-voice-rate-ticks i { width: 4px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, .18); }
 .dsh-voice-rate-ticks i.is-active { background: #007AFF; }
 
-/* hang-up: standalone red round key, same presence as the hero mic */
+/* hang-up: red round key, sized to the controls row's 52px height */
 .dsh-voice-hangup-ctl {
-  width: 72px; height: 72px; border-radius: 50%; flex: none;
+  width: 52px; height: 52px; border-radius: 50%; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
   border: none; cursor: pointer;
   background: #FF3B30; color: #fff;
-  box-shadow: 0 6px 18px rgba(255, 59, 48, .35), 0 1px 3px rgba(0, 0, 0, .12);
+  box-shadow: 0 4px 12px rgba(255, 59, 48, .3), 0 1px 3px rgba(0, 0, 0, .12);
   transition: filter .15s, transform .1s;
 }
-.dsh-voice-hangup-ctl svg { width: 26px; height: 26px; }
+.dsh-voice-hangup-ctl svg { width: 18px; height: 18px; }
 .dsh-voice-hangup-ctl:hover { filter: brightness(1.06); }
 .dsh-voice-hangup-ctl:active { transform: scale(.96); filter: brightness(.96); }
 
@@ -786,7 +786,7 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   .dsh-voice-speaker-pop { width: 240px; height: 260px; }
   .dsh-voice-rate-control { padding: 0 14px; gap: 10px; }
   .dsh-voice-rate-magnet { width: 140px; }
-  .dsh-voice-hangup-ctl { width: 64px; height: 64px; }
+  .dsh-voice-hangup-ctl { width: 52px; height: 52px; }
   .dsh-voice-wave { flex: 0 0 120px; height: 40px; }
   .dsh-voice-duration { margin-top: 2px; }
   .dsh-voice-live { min-height: 48px; margin-top: 10px; }
