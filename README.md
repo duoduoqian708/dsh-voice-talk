@@ -102,9 +102,9 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 ## 彩蛋
 
-假设你肩酸脖疼不想盯着屏幕，假设你恰好开了代理端口，假设你想运动工作两头兼顾——试着带着手机出门，边散步边聊开发吧。
+假设你不想盯着屏幕，想到户外活动一下；假设你恰好开了代理端口——那就带着手机出门，边散步边聊开发吧。
 
-<p align="center"><img src="docs/screenshots/call-mode-mobile.png" alt="手机上的通话层" width="240"></p>
+<img src="docs/screenshots/call-mode-mobile.png" alt="手机上的通话层" width="240">
 
 ## 环境要求
 

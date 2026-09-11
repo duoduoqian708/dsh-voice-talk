@@ -102,9 +102,9 @@ Changes on the settings page are persistent defaults; changes made in the call o
 
 ## Easter egg
 
-Suppose your shoulders and neck ache and you would rather not stare at a screen; suppose you happen to have a proxy port open; suppose you want to exercise and work at the same time — take your phone out for a walk and talk through your development while strolling.
+Suppose you would rather not stare at a screen and feel like getting outdoors; suppose you happen to have a proxy port open — then take your phone out for a walk and talk through your development while strolling.
 
-<p align="center"><img src="docs/screenshots/call-mode-mobile.png" alt="The call overlay on a phone" width="240"></p>
+<img src="docs/screenshots/call-mode-mobile.png" alt="The call overlay on a phone" width="240">
 
 ## Requirements
 
