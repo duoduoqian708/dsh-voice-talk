@@ -13,6 +13,10 @@ export interface RecognitionEvents {
   /** The vendor's VAD heard speech onset: live audio is flowing even when no
    *  interim text has landed yet — a gap here is not the user pausing. */
   onSpeech?(): void
+  /** Raw mic level (RMS of one ~40ms captured chunk): the LOCAL half of the
+   *  voice-activity signal the submission timer resets on. Optional — engines
+   *  without level reporting simply don't feed the endpointer. */
+  onLevel?(rms: number): void
   /** Transport state: false while the recognizer is reconnecting (no events
    *  can flow), true once a fresh session is ready. */
   onLink?(up: boolean): void

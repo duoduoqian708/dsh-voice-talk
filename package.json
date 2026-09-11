@@ -30,6 +30,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
+    "test:utterance": "node scripts/check-utterance.mjs",
     "prepare": "node scripts/build.mjs"
   },
   "dependencies": {

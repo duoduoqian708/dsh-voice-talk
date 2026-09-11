@@ -51,11 +51,15 @@ class AsrTap extends AudioWorkletProcessor {
       pos += ratio
       if (this.chunk.length >= 640) {
         const pcm = new Int16Array(640)
+        let sq = 0
         for (let k = 0; k < 640; k++) {
           const v = Math.max(-1, Math.min(1, this.chunk[k]))
+          sq += v * v
           pcm[k] = v < 0 ? Math.round(v * 32768) : Math.round(v * 32767)
         }
-        this.port.postMessage({ pcm: pcm.buffer }, [pcm.buffer])
+        // The chunk's RMS rides along: the local voice-activity endpointer
+        // consumes it, so submission timing never depends on vendor events.
+        this.port.postMessage({ pcm: pcm.buffer, rms: Math.sqrt(sq / 640) }, [pcm.buffer])
         this.chunk = []
       }
     }
@@ -207,7 +211,8 @@ export class CloudRecognizer implements Recognizer {
         const source = audioCtx.createMediaStreamSource(stream)
         const tap = new AudioWorkletNode(audioCtx, 'asr-tap')
         tap.port.onmessage = (event: MessageEvent): void => {
-          const payload = event.data as { pcm?: ArrayBuffer }
+          const payload = event.data as { pcm?: ArrayBuffer; rms?: number }
+          if (typeof payload.rms === 'number') events.onLevel?.(payload.rms)
           if (payload.pcm instanceof ArrayBuffer) sendChunk(payload.pcm)
         }
         source.connect(tap)

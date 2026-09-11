@@ -22,6 +22,7 @@ import { isStopCommand, looksLikeEcho, normalizeForEcho } from './echo-guard.ts'
 import { resolveSettings, type VoiceSettings } from './voice-settings.ts'
 import { voiceThemeOf } from './voice-themes.ts'
 import { SnapshotStore } from './store.ts'
+import { UtteranceMachine } from './utterance.ts'
 import type { QuestionAnswerView, QuestionItemView, QuestionOptionView, TranscriptMessage, TranscriptSegment, TranscriptState, VoiceStatus } from './types.ts'
 
 /** Shortest finalized utterance worth submitting (filters breaths and noise). */
@@ -38,6 +39,8 @@ const REPLY_TIMEOUT_MS = 180_000
 const FLUSH_MIN_CHARS = 100
 /** Utterance cap: speaking this long without a pause forces a submit. */
 const UTTERANCE_CAP_MS = 60_000
+/** Safety margin on top of the configured pause before a submit. */
+const SILENCE_MARGIN_MS = 300
 
 /** The input write path the controller submits through. */
 export interface InputWriteFace {
@@ -72,11 +75,6 @@ function partialTextOf(partial: PartialAssistant): string {
     .filter(block => block.kind === 'text')
     .map(block => (block as { kind: 'text'; text: string }).text)
     .join('')
-}
-
-/** Non-empty partial text with at least one real (non-punctuation) character. */
-function hasRecognizedText(interim: string): boolean {
-  return /[\p{L}\p{N}]/u.test(interim)
 }
 
 /**
@@ -449,18 +447,15 @@ export class VoiceController {
   /** ASR engine cache (one live recognizer per configured vendor). */
   #asrCache: { id: string; recognizer: CloudRecognizer } | null = null
   #recognitionHandle: ReturnType<CloudRecognizer['start']> = null
-  /** Speech-start epoch of the current utterance (drives the 60s cap UI). */
-  #utteranceStartAt: number | null = null
-  #utteranceTimer: ReturnType<typeof setTimeout> | null = null
-  #silenceTimer: ReturnType<typeof setTimeout> | null = null
+  /** The utterance/submission state machine (see utterance.ts). */
+  readonly #utt: UtteranceMachine
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
   #replyTimer: ReturnType<typeof setTimeout> | null = null
   #echoMuteTimer: ReturnType<typeof setTimeout> | null = null
-  #pendingFinal: string | null = null
-  /** The current (unfinalized) partial of the item being transcribed: what
-   *  the user sees streaming. Flushes join it with #pendingFinal, so a pause
-   *  or the 60s cap never drops the half-sentence on screen. */
-  #liveInterim = ''
+  /** TEMP TRACE: epoch of the first trace line (removed after validation). */
+  #traceT0 = 0
+  /** TEMP TRACE: throttle clock per event key (removed after validation). */
+  readonly #traceAt = new Map<string, number>()
   /** Voice follow-up for a blocking approval/question (see #checkPending). */
   #pendingVoice: PendingVoiceState | null = null
   /** Waits already responded to; skipped until the snapshot drops them. */
@@ -502,6 +497,21 @@ export class VoiceController {
 
   constructor(deps: VoiceControllerDeps) {
     this.#deps = deps
+    // The utterance machine owns every submission-timing decision: one timer,
+    // reset by new text or live voice (local level / vendor VAD), forced out
+    // by the 60s ceiling. The controller only routes events into it.
+    this.#utt = new UtteranceMachine({
+      now: () => Date.now(),
+      setTimer: (callback, ms) => setTimeout(callback, ms),
+      clearTimer: handle => clearTimeout(handle),
+      onSubmit: text => this.#submitUtterance(text),
+      onDisplay: text => this.status.patch({ interim: text }),
+      onWindow: startAt => this.status.patch({ utteranceStartAt: startAt }),
+      onTrace: (event, detail) => this.#trace(event, detail),
+    }, () => {
+      const settings = resolveSettings(this.#deps.settings())
+      return { silenceMs: settings.silenceTimeout * 1000, marginMs: SILENCE_MARGIN_MS, capMs: UTTERANCE_CAP_MS }
+    })
     // Transcript mirror (the overlay's right-hand stream) rides the same
     // snapshot subscription as the pending counter.
     this.#syncTranscript()
@@ -568,15 +578,13 @@ export class VoiceController {
     if (this.status.getSnapshot().mode !== 'loop') return
     const muted = !this.status.getSnapshot().micMuted
     this.status.patch({ micMuted: muted, interim: '' })
+    this.#trace('mute', { muted })
     if (muted) {
-      this.#clearUtterance()
+      // Muting discards the unfinished utterance: the mic is off, so nothing
+      // accumulated before the mute can be completed.
       this.#recognitionHandle?.stop()
       this.#recognitionHandle = null
-      this.#pendingFinal = null
-      if (this.#silenceTimer !== null) {
-        clearTimeout(this.#silenceTimer)
-        this.#silenceTimer = null
-      }
+      this.#utt.reset()
     } else if (this.#rearmListeningAfterMute()) {
       this.#startRecognition()
     }
@@ -654,24 +662,20 @@ export class VoiceController {
     }
     const settings = resolveSettings(this.#deps.settings())
     this.#recognitionHandle = recognizer.start({
+      // Machine inputs are only live during pure listening: while the reply is
+      // being spoken the finals are barge-in material, and while a blocking
+      // wait is pending they are answers — both route elsewhere.
       onInterim: interim => {
-        this.#liveInterim = interim
-        this.status.patch({ interim: this.#composeInterim(interim) })
-        if (hasRecognizedText(interim)) {
-          // The 60s cap opens on the FIRST recognized text, never on raw mic
-          // energy: wind, keyboards, and room noise must not start the clock —
-          // only text the cloud model actually produced counts as input.
-          this.#openUtteranceWindow()
-          // The flush window counts from the LAST recognized text, not from
-          // the last vendor final: a final lands at a pause, so the old timer
-          // could expire mid-speech once the user resumed talking.
-          if (this.#pendingFinal !== null) this.#resetSilenceTimer()
-        }
+        if (!this.#machineListening()) return
+        this.#utt.partial(interim)
       },
       onSpeech: () => {
-        // The vendor VAD heard live speech: whatever text gap follows is
-        // capture latency, not the user pausing — keep the countdown alive.
-        if (this.#silenceTimer !== null) this.#resetSilenceTimer()
+        if (!this.#machineListening()) return
+        this.#utt.speechOnset()
+      },
+      onLevel: rms => {
+        if (!this.#machineListening()) return
+        this.#utt.level(rms)
       },
       onLink: up => this.#onLink(up),
       onFinal: text => this.#onFinalUtterance(text),
@@ -691,6 +695,11 @@ export class VoiceController {
     if (this.#recognitionHandle === null) this.#degradeToIdle()
   }
 
+  /** Whether machine inputs should be consumed right now (pure listening). */
+  #machineListening(): boolean {
+    return this.status.getSnapshot().phase === 'listening' && !this.#pendingActive()
+  }
+
   /**
    * The recognizer the settings' 听 engine selects (one cached instance per
    * vendor; the bridge surfaces missing credentials as a fatal error itself).
@@ -703,34 +712,9 @@ export class VoiceController {
     return recognizer
   }
 
-  /** First recognized text of an utterance opens the 60s cap window. */
-  #openUtteranceWindow(): void {
-    const snap = this.status.getSnapshot()
-    if (this.#disposed || snap.mode !== 'loop' || snap.micMuted) return
-    if (snap.phase !== 'listening' || this.#utteranceStartAt !== null) return
-    const startAt = Date.now()
-    this.#utteranceStartAt = startAt
-    this.status.patch({ utteranceStartAt: startAt })
-    this.#utteranceTimer = setTimeout(() => {
-      this.#utteranceTimer = null
-      // Cap reached: force the turn out even if the user keeps talking.
-      this.#flushPending()
-    }, UTTERANCE_CAP_MS)
-  }
-
-  /** Close the cap window (submit, mute, hang-up, phase leave all land here). */
-  #clearUtterance(): void {
-    if (this.#utteranceTimer !== null) {
-      clearTimeout(this.#utteranceTimer)
-      this.#utteranceTimer = null
-    }
-    this.#utteranceStartAt = null
-    this.status.patch({ utteranceStartAt: null })
-  }
-
   #armListening(): void {
     if (this.#disposed) return
-    this.#liveInterim = ''
+    this.#utt.reset()
     this.status.patch({ phase: 'listening', interim: '', caption: '' })
     this.#startRecognition()
   }
@@ -738,6 +722,7 @@ export class VoiceController {
   #degradeToIdle(): void {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
+    this.#utt.reset()
     if (this.status.getSnapshot().mode !== 'off') this.status.patch({ mode: 'off' })
     this.status.patch({ phase: 'idle', interim: '', caption: '' })
   }
@@ -754,9 +739,6 @@ export class VoiceController {
     // (abort races, timeout degrade) — it must never reach the composer.
     if (this.status.getSnapshot().mode !== 'loop') return
     if (this.status.getSnapshot().micMuted) return
-    // A final ends its item: the item's live partial is now superseded by
-    // the accumulated #pendingFinal (display continuity is patched below).
-    this.#liveInterim = ''
     if (this.#speaking) {
       // Stop commands first: they bypass the echo guard and the arm delay
       // (the guard unconditionally eats short commands), and they only
@@ -781,6 +763,7 @@ export class VoiceController {
       this.#speaking = false
       this.#spokenText = null
       this.#speaker().cancel()
+      this.#trace('submit', { source: 'barge-in', textLen: text.length })
       this.#submitUtterance(text)
       return
     }
@@ -798,52 +781,32 @@ export class VoiceController {
     }
     // A blocking interaction owns the mic while it waits: the answer goes to
     // the matcher → protocol respond, never into the composer.
-    if (this.#pendingVoice !== null || this.#deps.readSnapshot().pending.length > 0) {
+    if (this.#pendingActive()) {
       this.#handlePendingAnswer(text)
       return
     }
-    // Accumulate finalized text; the silence timer flushes it as one prompt.
-    this.#pendingFinal = this.#pendingFinal === null ? text : `${this.#pendingFinal}，${text}`
-    this.#resetSilenceTimer()
-    // Keep the finalized text on screen through the pause — the next
-    // utterance's interim would otherwise replace it visually (the data
-    // already survives in #pendingFinal; this is display continuity only).
-    this.status.patch({ interim: this.#pendingFinal })
-  }
-
-  /**
-   * Live display composer: finalized-but-unsubmitted text stays visible
-   * ahead of the current utterance's streaming interim, joined with the
-   * same '，' the submission uses — what the user reads is what will be sent.
-   */
-  #composeInterim(live: string): string {
-    if (this.#pendingFinal === null) return live
-    if (live === '') return this.#pendingFinal
-    return `${this.#pendingFinal}，${live}`
+    // Only a listening round accumulates an utterance: a late final landing
+    // while the reply is still generating must not seed the next round.
+    if (this.status.getSnapshot().phase !== 'listening') return
+    this.#utt.final(text)
   }
 
   /** Drop capture for a moment after an echo hit, then re-arm cleanly. */
   #muteAfterEcho(): void {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
-    // Keep #pendingFinal: the echo segment never reached the buffer, so what
-    // is held here is real finalized speech from before the hit — wiping it
-    // dropped the pre-pause half of a two-segment utterance. Only the flush
-    // countdown is put on hold while the mic is down.
-    if (this.#silenceTimer !== null) {
-      clearTimeout(this.#silenceTimer)
-      this.#silenceTimer = null
-    }
-    this.status.patch({ interim: this.#pendingFinal ?? '' })
+    // The kept text lives in the utterance machine: suspend freezes its
+    // countdown without dropping what was already finalized. When the mic is
+    // back, a fresh full countdown starts from that moment.
+    this.#utt.suspend()
+    this.#trace('echo-suspend', {})
     if (this.#echoMuteTimer !== null) clearTimeout(this.#echoMuteTimer)
     if (this.#rearmListeningAfterMute()) {
       this.#echoMuteTimer = setTimeout(() => {
         this.#echoMuteTimer = null
         if (!this.#rearmListeningAfterMute()) return
         this.#startRecognition()
-        // Nothing new has been recognized yet: give the kept buffer its own
-        // silence window so it cannot be stranded until the next utterance.
-        if (this.#pendingFinal !== null) this.#resetSilenceTimer()
+        this.#utt.resume()
       }, 2_000)
     }
   }
@@ -858,48 +821,16 @@ export class VoiceController {
 
   /**
    * Recognition transport state. While the link is down no events can flow,
-   * so an event gap there says nothing about the user: park the flush
-   * countdown and give the kept text a fresh window once the link is back.
+   * so an event gap there says nothing about the user: park the countdown
+   * (suspend keeps all text) and restart a full countdown once back up.
    */
   #onLink(up: boolean): void {
+    this.#trace('link', { up })
     if (!up) {
-      if (this.#silenceTimer !== null) {
-        clearTimeout(this.#silenceTimer)
-        this.#silenceTimer = null
-      }
+      this.#utt.suspend()
       return
     }
-    if (this.#pendingFinal !== null && this.#rearmListeningAfterMute()) this.#resetSilenceTimer()
-  }
-
-  #resetSilenceTimer(): void {
-    if (this.#silenceTimer !== null) clearTimeout(this.#silenceTimer)
-    const seconds = resolveSettings(this.#deps.settings()).silenceTimeout
-    this.#silenceTimer = setTimeout(() => this.#flushPending(), seconds * 1000)
-  }
-
-  #flushPending(): void {
-    if (this.#silenceTimer !== null) {
-      clearTimeout(this.#silenceTimer)
-      this.#silenceTimer = null
-    }
-    // The utterance window closes whatever flushed it (silence, the 60s cap).
-    this.#clearUtterance()
-    // Submit what the user saw: finalized segments PLUS the sentence still in
-    // flight, joined exactly like the display. Dropping the live tail ate the
-    // half-sentence a pause interrupted, and with no vendor final at all made
-    // the cap flush nothing.
-    const pending = this.#pendingFinal ?? ''
-    const live = this.#liveInterim
-    const text = pending === ''
-      ? (live === '' ? null : live)
-      : (live === '' ? pending : `${pending}，${live}`)
-    this.#pendingFinal = null
-    this.#liveInterim = ''
-    // The flush timer can outlive a hang-up by a beat; never submit then.
-    if (this.status.getSnapshot().mode !== 'loop') return
-    if (text === null || text.length < MIN_UTTERANCE_CHARS) return
-    this.#submitUtterance(text)
+    this.#utt.resume()
   }
 
   // ---- blocking interactions: speak the ask, match the spoken answer -------
@@ -928,6 +859,10 @@ export class VoiceController {
     const wait = waits.find(candidate => !this.#resolvedWaits.has(candidate.key))
     if (wait === undefined) return
     this.#pendingVoice = { wait, qi: 0, answers: new Map(), collected: [], retries: 0, awaiting: false }
+    // The answer is not an utterance: drop anything the machine may hold so
+    // the spoken response can never leak into the composer.
+    this.#utt.reset()
+    this.#trace('pending-start', { kind: wait.kind })
     void this.#announcePending()
   }
 
@@ -1126,15 +1061,12 @@ export class VoiceController {
   // ---- submission + readout chain ------------------------------------------
 
   #submitUtterance(text: string): void {
+    // The flush can outlive a hang-up by a beat; never submit then.
+    if (this.status.getSnapshot().mode !== 'loop') return
+    if (text.length < MIN_UTTERANCE_CHARS) return
     // The mic pauses while the agent works; it re-arms after the readout.
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
-    this.#clearUtterance()
-    this.#liveInterim = ''
-    if (this.#silenceTimer !== null) {
-      clearTimeout(this.#silenceTimer)
-      this.#silenceTimer = null
-    }
     this.#roundToken += 1
     this.status.patch({ interim: '', caption: '', lastPrompt: text, phase: 'thinking' })
     this.#deps.input.setDraft(text)
@@ -1376,8 +1308,6 @@ export class VoiceController {
     // utterances of the next listening phase (tails land after "playback end").
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
-    this.#pendingFinal = null
-    this.#liveInterim = ''
     const spoken = this.#spokenText
     if (spoken !== null && spoken !== '') {
       this.#spokenTail = spoken
@@ -1412,17 +1342,32 @@ export class VoiceController {
     return messages.length > 0 ? messages[messages.length - 1]!.seq : 0
   }
 
+  /** Blocking interaction active: spoken input answers it, not the composer. */
+  #pendingActive(): boolean {
+    return this.#pendingVoice !== null || this.#deps.readSnapshot().pending.length > 0
+  }
+
+  /**
+   * TEMP TRACE (removed after validation): one compact console line per
+   * interesting event, with a monotonic offset. Repeated signals of the same
+   * source are throttled to one per second so the trace stays readable.
+   */
+  #trace(event: string, detail?: Record<string, unknown>): void {
+    const now = Date.now()
+    if (this.#traceT0 === 0) this.#traceT0 = now
+    const key = `${event}:${String(detail?.['source'] ?? '')}`
+    if (event === 'signal' && now - (this.#traceAt.get(key) ?? 0) < 1_000) return
+    this.#traceAt.set(key, now)
+    console.debug(`[voice-trace +${((now - this.#traceT0) / 1000).toFixed(2)}s] ${event}`, detail ?? {})
+  }
+
   #disarmAll(): void {
     this.#recognitionHandle?.stop()
     this.#recognitionHandle = null
     this.#speaker().cancel()
     this.#pendingVoice = null
     this.#resolvedWaits.clear()
-    this.#clearUtterance()
-    if (this.#silenceTimer !== null) {
-      clearTimeout(this.#silenceTimer)
-      this.#silenceTimer = null
-    }
+    this.#utt.dispose()
     if (this.#rearmTimer !== null) {
       clearTimeout(this.#rearmTimer)
       this.#rearmTimer = null
@@ -1440,8 +1385,6 @@ export class VoiceController {
     this.#spokenText = null
     this.#spokenTail = null
     this.#spokenTailUntil = 0
-    this.#pendingFinal = null
-    this.#liveInterim = ''
     this.#sawTurnActivity = false
     this.#spokenTurnId = null
   }
