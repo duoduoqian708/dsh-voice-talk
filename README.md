@@ -107,7 +107,7 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 ## 彩蛋
 
-假设你肩酸脖疼不想盯着屏幕，假设你恰好开了代理端口，假设你是工作狂又想兼顾开发——试着带着手机出门，边散步边聊开发吧。
+假设你肩酸脖疼不想盯着屏幕，假设你恰好开了代理端口，假设你想运动工作两头兼顾——试着带着手机出门，边散步边聊开发吧。
 
 ![手机上的通话层](docs/screenshots/call-mode-mobile.png)
 
