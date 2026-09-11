@@ -98,7 +98,27 @@ export const RECOMMENDED_SPEAKERS: readonly SpeakerOption[] = [
 const NOVELTY = /^(Eddy|Grandma|Grandpa|Rocko)\b/i
 
 /** System-theme roster: curated hits first, then the platform tail, then default. */
+/** Cached platform rosters per language. getVoices() is not free and the
+ *  settings card/modal ask for the roster on every render; the cache is
+ *  dropped when the browser's voice list changes. */
+const systemRosterCache = new Map<string, Array<SpeakerOption | { id: string; label: string; more: true }>>()
+let rosterWatchInstalled = false
+function watchVoices(): void {
+  if (rosterWatchInstalled || typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  rosterWatchInstalled = true
+  window.speechSynthesis.addEventListener('voiceschanged', () => systemRosterCache.clear())
+}
+
 export function speakerOptions(lang: string): Array<SpeakerOption | { id: string; label: string; more: true }> {
+  watchVoices()
+  const cached = systemRosterCache.get(lang)
+  if (cached !== undefined) return cached
+  const roster = buildSpeakerOptions(lang)
+  systemRosterCache.set(lang, roster)
+  return roster
+}
+
+function buildSpeakerOptions(lang: string): Array<SpeakerOption | { id: string; label: string; more: true }> {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return [{ id: '', label: '系统默认', more: true }]
   }

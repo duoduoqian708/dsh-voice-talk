@@ -350,6 +350,8 @@ export class VoiceController {
   #pendingVoice: PendingVoiceState | null = null
   /** Waits already responded to; skipped until the snapshot drops them. */
   readonly #resolvedWaits = new Set<string>()
+  /** Pending rAF handle coalescing the transcript mirror. */
+  #transcriptFrame: number | null = null
   #lastSpokenSeq = 0
   #speaking = false
   #speakingSince = 0
@@ -389,7 +391,11 @@ export class VoiceController {
       if (count !== this.status.getSnapshot().pendingCount) {
         this.status.patch({ pendingCount: count })
       }
-      this.#syncTranscript()
+      // The transcript mirror feeds ONLY the call overlay: while no call is
+      // armed there is nothing to render, and a long session's snapshot tick
+      // must not tax the main thread page-wide. In-call ticks are coalesced
+      // to one rebuild per frame (streaming emits many per frame).
+      if (this.status.getSnapshot().mode === 'loop') this.#queueTranscriptSync()
       this.#checkPending()
     })
   }
@@ -402,10 +408,24 @@ export class VoiceController {
     this.transcript.set(next)
   }
 
+  /** Coalesce in-call transcript mirroring to one rebuild per frame. */
+  #queueTranscriptSync(): void {
+    if (this.#transcriptFrame !== null) return
+    this.#transcriptFrame = requestAnimationFrame(() => {
+      this.#transcriptFrame = null
+      if (this.#disposed) return
+      if (this.status.getSnapshot().mode !== 'loop') return
+      this.#syncTranscript()
+    })
+  }
+
   /** Enter the hands-free loop (the mic button's on arm). */
   startLoop(): void {
     if (this.status.getSnapshot().mode === 'loop') return
     this.#lastSpokenSeq = this.#latestAssistantSeq()
+    // The overlay's first render needs the mirror ready — sync BEFORE the
+    // mode flips (the subscription only mirrors while already in loop).
+    this.#syncTranscript()
     this.status.patch({ mode: 'loop', error: null, lastPrompt: '' })
     this.#armListening()
     // Entering with a blocking wait already pending: handle it right away.
@@ -489,6 +509,10 @@ export class VoiceController {
 
   dispose(): void {
     this.#disposed = true
+    if (this.#transcriptFrame !== null) {
+      cancelAnimationFrame(this.#transcriptFrame)
+      this.#transcriptFrame = null
+    }
     this.#unsubscribePending?.()
     this.#unsubscribePending = null
     this.#disarmAll()

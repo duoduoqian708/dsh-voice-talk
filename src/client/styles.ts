@@ -236,9 +236,11 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
 
 /* ---- call overlay: light canvas, two glass tiles ----
    Performance contract: the canvas is a STATIC opaque light gradient (no
-   filter, no animation). backdrop-filter sits on the two tiles + controls
-   whose backdrop never changes; per-frame motion (bars, breath) is
-   transform/opacity only. Breath = who speaks; the other side rests. */
+   filter, no animation), and the two big tiles carry NO backdrop-filter —
+   their backdrop is that flat canvas, so a blur is invisible while its
+   recomposite would land on every fold/scroll frame. Only the speaker popup
+   (whose backdrop has content) keeps one. Per-frame motion (bars, breath,
+   fold) is transform/opacity/layout only. Breath = who speaks. */
 .dsh-voice-call {
   position: fixed; inset: 0; z-index: 9999;
   display: flex; justify-content: center;
@@ -261,9 +263,11 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   /* Junction side squared: the tiles read as ONE surface split by the 1px
      border-right hairline (the right tile drops its left border). */
   border-radius: 28px 0 0 28px;
+  /* No backdrop-filter here: the backdrop is the opaque static canvas, so a
+     blur is invisible while its recomposite cost lands on every frame of the
+     fold animation and stream scrolling. Only the speaker popup keeps one —
+     its backdrop carries real content. */
   background: rgba(255, 255, 255, .72);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
-  backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid rgba(0, 0, 0, .08);
   box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
   animation: dsh-tile-in .35s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)) backwards;
@@ -518,13 +522,13 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   /* The left border is dropped: the junction hairline is the LEFT tile's
      border-right — two adjacent borders would read as a 2px seam. */
   border-radius: 0 28px 28px 0;
+  /* See the left tile: no backdrop-filter on the big surfaces. */
   background: rgba(255, 255, 255, .72);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
-  backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid rgba(0, 0, 0, .08);
   border-left: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
   overflow: hidden;
+  contain: layout paint;
   animation: dsh-tile-in .35s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)) .05s backwards;
   transition: flex-grow .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), margin-left .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), opacity .25s, transform .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1)), border-radius .32s var(--dsh-ease, cubic-bezier(.25,.1,.25,1));
 }
@@ -538,6 +542,9 @@ body[data-ds-dark-theme] .dsh-voice-table th { background: rgba(255, 255, 255, .
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
 }
+/* Fold: the tile fades fast, then its content stops painting for the rest of
+   the flex transition — the shrinking width never repaints streaming text. */
+.dsh-voice-call.is-collapsed .dsh-voice-stream { visibility: hidden; transition: visibility 0s linear .15s; }
 /* jump-to-latest: floats bottom-right while the user is reading history */
 .dsh-voice-jump {
   position: absolute; right: 20px; bottom: 20px; z-index: 6;

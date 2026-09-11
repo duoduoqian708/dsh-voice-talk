@@ -175,12 +175,21 @@ export function apply(ctx: ClientContext): void {
   })
   const syncCard = (): void => {
     const snapshot = settingsScope.getSnapshot()
-    cardStore.set({
+    const next: VoiceCardState = {
       status: snapshot.status,
       value: snapshot.status === 'ready' ? resolveSettings(snapshot.value) : { ...VOICE_DEFAULTS },
       user: (snapshot.user ?? {}) as Record<string, unknown>,
       writable: snapshot.writable,
-    })
+    }
+    // Settings scopes emit on refreshes that change nothing for this card;
+    // publishing an identical state re-renders the whole card (and any open
+    // modal) for no reason — skip when the resolved fields are unchanged.
+    const current = cardStore.getSnapshot()
+    if (current.status === next.status
+      && current.writable === next.writable
+      && JSON.stringify(current.value) === JSON.stringify(next.value)
+      && JSON.stringify(current.user) === JSON.stringify(next.user)) return
+    cardStore.set(next)
   }
   const disposeCardSync = settingsScope.subscribe(syncCard)
   ctx.effect(() => disposeCardSync, 'voice-talk: settings-card sync')
