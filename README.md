@@ -66,7 +66,10 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 ## 问题反馈
 
-遇到问题或有想法，欢迎提 [Issue](https://github.com/duoduoqian708/dsh-voice-talk/issues)。
+遇到问题或有想法，欢迎通过任一方式反馈：
+
+- 提交 [Issue](https://github.com/duoduoqian708/dsh-voice-talk/issues)（推荐，便于跟进与修复）
+- 在插件市场的卡片下留言（与插件主页的讨论区互通）
 
 ## License
 

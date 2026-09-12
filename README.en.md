@@ -66,7 +66,10 @@ Suppose you would rather not stare at a screen and feel like getting outdoors; s
 
 ## Feedback
 
-Found a problem or have an idea? Open an [issue](https://github.com/duoduoqian708/dsh-voice-talk/issues).
+Found a bug or have an idea? Reach us either way:
+
+- Open a [GitHub issue](https://github.com/duoduoqian708/dsh-voice-talk/issues) (preferred, easiest to track and fix)
+- Comment on the plugin's card in the marketplace (shared with the plugin's discussion thread)
 
 ## License
 

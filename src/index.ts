@@ -10,14 +10,14 @@
 // no prompt-side protocol is involved.
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from 'schemastery'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { makeVoiceTtsRoutes } from './tts-bridge.ts'
 import { registerQwenUpgrade, QWEN_DEFAULT_ENDPOINT, QWEN_DEFAULT_MODEL } from './tts-qwen.ts'
 import { registerAsrUpgrade } from './asr-bridge.ts'
 
-/** Settings namespace both halves read. */
-export const VOICE_SETTINGS_NAMESPACE = settingsNamespace('voice')
+/** Settings namespace both halves read (a plain string on both host lines). */
+export const VOICE_SETTINGS_NAMESPACE = 'voice'
 
 /** User configuration of the voice surfaces (read by the browser half). */
 export interface Config {
@@ -81,21 +81,41 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Register the `voice` settings namespace (composition entry as the base
- * layer; settings edits reach the browser live through its scope
- * subscription) and the TTS bridge routes for the cloud speech vendors.
+ * Register the `voice` settings namespace and the TTS bridge routes for the
+ * cloud speech vendors.
+ *
+ * The settings SDK changed shape across host lines — the current line exposes
+ * `ctx.settings.installSection(owner, ns, …)` while the older line exported a
+ * free `installSettingsSection` helper — and importing either name statically
+ * is fatal on the other line: the module has no such export, so the loader
+ * entry fails to import and takes the whole profile's boot down with it. Both
+ * lines do expose `ctx.settings.register(ns, schema, { base })`, so registering
+ * through that common surface keeps one code path with no SDK import beyond
+ * types (which erase at build time).
  */
 export function apply(ctx: Context, config?: Config): void {
-  installSettingsSection(ctx, VOICE_SETTINGS_NAMESPACE, Config, config ?? {}, {
-    setSource: () => { /* the browser half reads the live scope itself */ },
-    onChange: () => { /* nothing host-side reacts to voice settings */ },
-  })
+  installVoiceSettings(ctx, config)
   // Declared inject (not ctx.get): the loader waits for the web server, so
   // the bridge routes are guaranteed a live registration site.
   for (const route of makeVoiceTtsRoutes(ctx)) ctx.webServer.register(route)
   ctx.webServer.registerUpgrade(registerQwenUpgrade(ctx))
   ctx.webServer.registerUpgrade(registerAsrUpgrade(ctx, 'qwen'))
   ctx.webServer.registerUpgrade(registerAsrUpgrade(ctx, 'xfyun'))
+}
+
+/**
+ * Register the `voice` namespace on whichever settings provider the host ships.
+ * `ctx.inject` waits for the provider, so a host without one simply runs from
+ * the composition config; the entry config rides `base`, below the user layer.
+ */
+function installVoiceSettings(ctx: Context, config?: Config): void {
+  ctx.inject(['settings'], (scoped) => {
+    scoped.settings.register(
+      VOICE_SETTINGS_NAMESPACE as unknown as SettingsNamespace,
+      Config,
+      { base: config ?? {} },
+    )
+  })
 }
 
 /** The bridge routes mount with the web server; credentials resolve per request. */
