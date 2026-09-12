@@ -36,6 +36,22 @@ const MIC_TIMEOUT_MS = 8_000
 const RESUME_TIMEOUT_MS = 3_000
 const WORKLET_TIMEOUT_MS = 5_000
 
+/** Local silence gate: drops sub-threshold audio instead of uploading room
+ *  tone. This saves upstream bandwidth, NOT money — the vendor bills only
+ *  effective speech seconds. OFF: the threshold can clip soft word onsets,
+ *  and noise-triggered filler is handled by the VAD threshold plus the
+ *  utterance-level filler filter. Set true to restore always-stream. */
+const USE_SILENCE_GATE = false
+const GATE_ON_RMS = 0.015
+const GATE_OFF_RMS = 0.008
+const GATE_HANGOVER_MS = 1_800
+/** 40 ms chunks kept while the gate is closed (~480 ms of preroll). */
+const GATE_PREROLL_CHUNKS = 12
+
+/** The bridge tears a session down after 120 s without frames: a JSON
+ *  keepalive keeps a long silent listening phase from idling out. */
+const KEEPALIVE_MS = 45_000
+
 /** Bound an await; rejection carries the label so the notice stays actionable. */
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -116,7 +132,10 @@ export class CloudRecognizer implements Recognizer {
     let ready = false
     let readyTimer: ReturnType<typeof setTimeout> | null = null
     let failures = 0
-    let tracedPcm = false
+    let keepalive: ReturnType<typeof setInterval> | null = null
+    let gateOpen = false
+    let lastVoiceAt = 0
+    let preRoll: ArrayBuffer[] = []
     const pending: ArrayBuffer[] = []
     let stream: MediaStream | null = null
     let audioCtx: AudioContext | null = null
@@ -138,6 +157,7 @@ export class CloudRecognizer implements Recognizer {
       const s = socket
       socket = null
       ready = false
+      if (keepalive !== null) { clearInterval(keepalive); keepalive = null }
       if (s !== null) { try { s.close() } catch { /* already down */ } }
     }
 
@@ -156,6 +176,32 @@ export class CloudRecognizer implements Recognizer {
       try { socket.send(buffer) } catch { pending.push(buffer) }
     }
 
+    /** Silence gate: drop sub-threshold audio instead of billing the stream. */
+    const feedChunk = (buffer: ArrayBuffer, rms: number | undefined): void => {
+      const level = rms ?? 1
+      if (!USE_SILENCE_GATE) { sendChunk(buffer); return }
+      const now = Date.now()
+      if (level >= GATE_ON_RMS) {
+        lastVoiceAt = now
+        if (!gateOpen) {
+          gateOpen = true
+          for (const chunk of preRoll.splice(0)) sendChunk(chunk)
+        }
+      } else if (gateOpen && level >= GATE_OFF_RMS) {
+        lastVoiceAt = now
+      }
+      if (gateOpen) {
+        sendChunk(buffer)
+        if (now - lastVoiceAt > GATE_HANGOVER_MS) {
+          gateOpen = false
+          preRoll = []
+        }
+        return
+      }
+      preRoll.push(buffer)
+      if (preRoll.length > GATE_PREROLL_CHUNKS) preRoll.shift()
+    }
+
     const handleUpstream = (data: string): void => {
       let event: { type?: string; text?: string; error?: string; code?: string }
       try {
@@ -167,7 +213,6 @@ export class CloudRecognizer implements Recognizer {
         ready = true
         failures = 0
         if (readyTimer !== null) { clearTimeout(readyTimer); readyTimer = null }
-        events.onTrace?.('asr-ready', {})
         // Every successful session resets the backoff — iFlytek's per-utterance
         // rotation must not let the reconnect delay creep toward its max.
         restartAttempt = 0
@@ -192,7 +237,6 @@ export class CloudRecognizer implements Recognizer {
         disposed = true
         releaseMic()
         closeSocket()
-        events.onTrace?.('asr-error', { code: event.code })
         events.onError(event.error ?? this.#t('err.asrFailed'), true, event.code)
       }
     }
@@ -201,8 +245,13 @@ export class CloudRecognizer implements Recognizer {
       const ws = new WebSocket(bridgeUrl())
       socket = ws
       ws.onopen = () => {
-        events.onTrace?.('asr-ws-open', {})
         ws.send(hello)
+        if (keepalive !== null) clearInterval(keepalive)
+        keepalive = setInterval(() => {
+          try {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'keepalive' }))
+          } catch { /* raced down */ }
+        }, KEEPALIVE_MS)
       }
       ws.onmessage = event => {
         if (typeof event.data === 'string') handleUpstream(event.data)
@@ -210,12 +259,12 @@ export class CloudRecognizer implements Recognizer {
       ws.onclose = () => {
         socket = null
         ready = false
+        if (keepalive !== null) { clearInterval(keepalive); keepalive = null }
         if (disposed || restarting) return
         // Unexpected drop (network blip): re-arm with backoff, mic stays.
         // Nothing can arrive while the link is down, so surface it: the loop
         // must not read the event gap as the user pausing.
         failures += 1
-        events.onTrace?.('asr-ws-close', { failures })
         events.onLink?.(false)
         if (failures >= MAX_RECONNECT_FAILURES) {
           // Retrying no longer helps and silent backoff would look like a dead
@@ -229,14 +278,12 @@ export class CloudRecognizer implements Recognizer {
         restarting = true
         const delay = Math.min(RECONNECT_BASE_MS * 2 ** restartAttempt, RECONNECT_MAX_MS)
         restartAttempt += 1
-        events.onTrace?.('asr-reconnect', { attempt: restartAttempt, delay })
         restartTimer = setTimeout(() => {
           restarting = false
           restartTimer = null
           if (!disposed) openSocket()
         }, delay)
       }
-      ws.onerror = () => { events.onTrace?.('asr-ws-error', {}) }
     }
 
     const attachMic = async (): Promise<void> => {
@@ -251,7 +298,6 @@ export class CloudRecognizer implements Recognizer {
         if (audioCtx.state !== 'running') {
           // A suspended context runs no worklet callbacks: zero PCM, zero
           // errors, zero text. Fail loud instead of looking like a dead mic.
-          events.onTrace?.('asr-audio-suspended', { state: audioCtx.state })
           releaseMic()
           events.onError(this.#t('err.asrAudio'), true)
           return
@@ -265,15 +311,12 @@ export class CloudRecognizer implements Recognizer {
           const payload = event.data as { pcm?: ArrayBuffer; rms?: number }
           if (typeof payload.rms === 'number') events.onLevel?.(payload.rms)
           if (payload.pcm instanceof ArrayBuffer) {
-            if (!tracedPcm) { tracedPcm = true; events.onTrace?.('asr-pcm', {}) }
-            sendChunk(payload.pcm)
+            feedChunk(payload.pcm, payload.rms)
           }
         }
         source.connect(tap)
-        events.onTrace?.('asr-mic', { state: audioCtx.state })
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
-        events.onTrace?.('asr-mic-fail', { detail })
         events.onError(detail === '' ? this.#t('err.micDenied') : `${this.#t('err.micDenied')}（${detail}）`, true)
       }
     }
@@ -287,7 +330,6 @@ export class CloudRecognizer implements Recognizer {
       if (restartTimer !== null) { clearTimeout(restartTimer); restartTimer = null }
       releaseMic()
       closeSocket()
-      events.onTrace?.('asr-ready-timeout', {})
       events.onError(this.#t('err.asrNoLink'), true)
     }, READY_TIMEOUT_MS)
 

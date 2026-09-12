@@ -30,7 +30,7 @@ export interface UtteranceConfig {
   readonly capMs: number
 }
 
-/** Injection face: time, timers, outputs (and the temporary trace sink). */
+/** Injection face: time, timers, outputs. */
 export interface UtteranceHost {
   now(): number
   setTimer(callback: () => void, ms: number): TimerHandle
@@ -41,13 +41,26 @@ export interface UtteranceHost {
   onDisplay(text: string): void
   /** The cap window opened (epoch ms) or closed (null). */
   onWindow(startAt: number | null): void
-  /** Temporary diagnostics (the voice trace); absent = silent. */
-  onTrace?(event: string, detail?: Record<string, unknown>): void
 }
 
 /** Non-punctuation recognized content worth opening the window on. */
 function hasRecognizedText(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text)
+}
+
+/** Filler syllables the vendor hallucinates on non-speech audio (breath,
+ *  room tone, a playback tail): a segment that is ONLY these plus punctuation
+ *  is noise, never text. Bare "嗯" answers run through the controller's
+ *  pending-question flow, which bypasses this machine. */
+const FILLER_CHARS = new Set(['嗯', '呃', '啊', '哦', '噢', '唔', '唉', '诶', '欸'])
+function isFillerOnly(text: string): boolean {
+  let seen = false
+  for (const ch of text) {
+    if (FILLER_CHARS.has(ch)) { seen = true; continue }
+    if (/[\s\p{P}\p{S}]/u.test(ch)) continue
+    return false
+  }
+  return seen
 }
 
 export class UtteranceMachine {
@@ -63,7 +76,6 @@ export class UtteranceMachine {
   #windowAt: number | null = null
   #suspended = false
   #lastSignalAt = 0
-  #voiceWasActive = false
   #disposed = false
 
   constructor(host: UtteranceHost, config: () => UtteranceConfig) {
@@ -81,6 +93,8 @@ export class UtteranceMachine {
   partial(text: string): void {
     if (this.#disposed || this.#suspended) return
     if (text === '' || text === this.#live) return
+    // Noise-triggered filler stays out of the live area and the window.
+    if (isFillerOnly(text)) return
     this.#live = text
     if (!hasRecognizedText(text)) return
     this.#openWindow()
@@ -93,6 +107,12 @@ export class UtteranceMachine {
     if (this.#disposed || this.#suspended || text === '') return
     // The item's live partial is now superseded by its finalized text.
     this.#live = ''
+    if (isFillerOnly(text)) {
+      // Trailing hallucination (the vendor's "，嗯。" after real speech):
+      // drop it instead of joining it into the prompt.
+      this.#host.onDisplay(this.display)
+      return
+    }
     this.#settled = this.#settled === null ? text : `${this.#settled}，${text}`
     this.#openWindow()
     this.#signal('final')
@@ -109,10 +129,6 @@ export class UtteranceMachine {
   level(rms: number): void {
     if (this.#disposed || this.#suspended) return
     const active = this.#endpointer.push(rms)
-    if (active !== this.#voiceWasActive) {
-      this.#voiceWasActive = active
-      this.#host.onTrace?.('voice', { active, rms: Number(rms.toFixed(5)) })
-    }
     if (active && this.#windowAt !== null) this.#signal('voice')
   }
 
@@ -121,14 +137,12 @@ export class UtteranceMachine {
     if (this.#disposed || this.#suspended) return
     this.#suspended = true
     this.#cancelFlush()
-    this.#host.onTrace?.('suspend', { settled: this.#settled !== null, live: this.#live !== '' })
   }
 
   /** Resume after a suspension: a fresh full countdown from now. */
   resume(): void {
     if (this.#disposed || !this.#suspended) return
     this.#suspended = false
-    this.#host.onTrace?.('resume', { settled: this.#settled !== null, live: this.#live !== '' })
     if (this.#windowAt !== null && this.display !== '') this.#signal('resume')
   }
 
@@ -148,7 +162,6 @@ export class UtteranceMachine {
     this.#suspended = false
     this.#lastSignalAt = 0
     this.#endpointer.reset()
-    this.#voiceWasActive = false
     this.#host.onDisplay('')
   }
 
@@ -167,20 +180,16 @@ export class UtteranceMachine {
     this.#windowAt = at
     this.#lastSignalAt = at
     this.#host.onWindow(at)
-    this.#host.onTrace?.('window', { at })
     this.#capTimer = this.#host.setTimer(() => this.#flush('cap'), this.#config().capMs)
   }
 
   /** A text/voice signal: restart the submission countdown. */
-  #signal(source: 'partial' | 'final' | 'vad' | 'voice' | 'resume'): void {
+  #signal(_source: 'partial' | 'final' | 'vad' | 'voice' | 'resume'): void {
     if (this.#suspended || this.#windowAt === null) return
-    const now = this.#host.now()
-    const idle = Number(((now - this.#lastSignalAt) / 1000).toFixed(2))
-    this.#lastSignalAt = now
+    this.#lastSignalAt = this.#host.now()
     this.#cancelFlush()
     const { silenceMs, marginMs } = this.#config()
     this.#flushTimer = this.#host.setTimer(() => this.#flush('silence'), silenceMs + marginMs)
-    this.#host.onTrace?.('signal', { source, idle, textLen: this.display.length })
   }
 
   #cancelFlush(): void {
@@ -191,14 +200,13 @@ export class UtteranceMachine {
   }
 
   /** Countdown over (silence) or ceiling reached (cap): submit and go quiet. */
-  #flush(reason: 'silence' | 'cap'): void {
+  #flush(_reason: 'silence' | 'cap'): void {
     this.#cancelFlush()
     if (this.#capTimer !== null) {
       this.#host.clearTimer(this.#capTimer)
       this.#capTimer = null
     }
     const text = this.display
-    const idle = Number(((this.#host.now() - this.#lastSignalAt) / 1000).toFixed(2))
     if (this.#windowAt !== null) {
       this.#windowAt = null
       this.#host.onWindow(null)
@@ -207,10 +215,8 @@ export class UtteranceMachine {
     this.#live = ''
     this.#lastSignalAt = 0
     this.#endpointer.reset()
-    this.#voiceWasActive = false
     this.#host.onDisplay('')
     if (text === '') return
-    this.#host.onTrace?.('flush', { reason, idle, textLen: text.length, text: text.slice(0, 80) })
     this.#host.onSubmit(text)
   }
 }

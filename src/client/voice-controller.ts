@@ -469,10 +469,6 @@ export class VoiceController {
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
   #replyTimer: ReturnType<typeof setTimeout> | null = null
   #echoMuteTimer: ReturnType<typeof setTimeout> | null = null
-  /** TEMP TRACE: epoch of the first trace line (removed after validation). */
-  #traceT0 = 0
-  /** TEMP TRACE: throttle clock per event key (removed after validation). */
-  readonly #traceAt = new Map<string, number>()
   /** Voice follow-up for a blocking approval/question (see #checkPending). */
   #pendingVoice: PendingVoiceState | null = null
   /** Waits already responded to; skipped until the snapshot drops them. */
@@ -524,7 +520,6 @@ export class VoiceController {
       onSubmit: text => this.#submitUtterance(text),
       onDisplay: text => this.status.patch({ interim: text }),
       onWindow: startAt => this.status.patch({ utteranceStartAt: startAt }),
-      onTrace: (event, detail) => this.#trace(event, detail),
     }, () => {
       const settings = resolveSettings(this.#deps.settings())
       return { silenceMs: settings.silenceTimeout * 1000, marginMs: SILENCE_MARGIN_MS, capMs: UTTERANCE_CAP_MS }
@@ -599,7 +594,6 @@ export class VoiceController {
     if (this.status.getSnapshot().mode !== 'loop') return
     const muted = !this.status.getSnapshot().micMuted
     this.status.patch({ micMuted: muted, interim: '' })
-    this.#trace('mute', { muted })
     if (muted) {
       // Muting discards the unfinished utterance: the mic is off, so nothing
       // accumulated before the mute can be completed.
@@ -704,7 +698,6 @@ export class VoiceController {
         this.#utt.level(rms)
       },
       onLink: up => this.#onLink(up),
-      onTrace: (event, detail) => this.#trace(event, detail),
       onFinal: text => this.#onFinalUtterance(text),
       onEnd: () => { /* the recognizer reconnects itself */ },
       onError: (message, fatal, code) => {
@@ -794,7 +787,6 @@ export class VoiceController {
       this.#speaking = false
       this.#spokenText = null
       this.#speaker().cancel()
-      this.#trace('submit', { source: 'barge-in', textLen: text.length })
       this.#submitUtterance(text)
       return
     }
@@ -830,7 +822,6 @@ export class VoiceController {
     // countdown without dropping what was already finalized. When the mic is
     // back, a fresh full countdown starts from that moment.
     this.#utt.suspend()
-    this.#trace('echo-suspend', {})
     if (this.#echoMuteTimer !== null) clearTimeout(this.#echoMuteTimer)
     if (this.#rearmListeningAfterMute()) {
       this.#echoMuteTimer = setTimeout(() => {
@@ -856,7 +847,6 @@ export class VoiceController {
    * (suspend keeps all text) and restart a full countdown once back up.
    */
   #onLink(up: boolean): void {
-    this.#trace('link', { up })
     if (!up) {
       this.#utt.suspend()
       return
@@ -893,7 +883,6 @@ export class VoiceController {
     // The answer is not an utterance: drop anything the machine may hold so
     // the spoken response can never leak into the composer.
     this.#utt.reset()
-    this.#trace('pending-start', { kind: wait.kind })
     void this.#announcePending()
   }
 
@@ -1380,20 +1369,6 @@ export class VoiceController {
   /** Blocking interaction active: spoken input answers it, not the composer. */
   #pendingActive(): boolean {
     return this.#pendingVoice !== null || this.#deps.readSnapshot().pending.length > 0
-  }
-
-  /**
-   * TEMP TRACE (removed after validation): one compact console line per
-   * interesting event, with a monotonic offset. Repeated signals of the same
-   * source are throttled to one per second so the trace stays readable.
-   */
-  #trace(event: string, detail?: Record<string, unknown>): void {
-    const now = Date.now()
-    if (this.#traceT0 === 0) this.#traceT0 = now
-    const key = `${event}:${String(detail?.['source'] ?? '')}`
-    if (event === 'signal' && now - (this.#traceAt.get(key) ?? 0) < 1_000) return
-    this.#traceAt.set(key, now)
-    console.debug(`[voice-trace +${((now - this.#traceT0) / 1000).toFixed(2)}s] ${event}`, detail ?? {})
   }
 
   #disarmAll(): void {

@@ -55,7 +55,6 @@ function harness() {
   const clock = new Clock()
   const submits = []
   const windows = []
-  const traces = []
   const displays = []
   const machine = new UtteranceMachine({
     now: () => clock.now(),
@@ -64,7 +63,6 @@ function harness() {
     onSubmit: text => submits.push({ t: clock.now(), text }),
     onDisplay: text => displays.push({ t: clock.now(), text }),
     onWindow: at => windows.push({ t: clock.now(), at }),
-    onTrace: (event, detail) => traces.push({ t: clock.now(), event, detail }),
   }, () => ({ silenceMs: SILENCE_MS, marginMs: MARGIN_MS, capMs: 60_000 }))
   const feed = (seconds, rms) => {
     for (let i = 0; i < Math.round((seconds * 1000) / FEED_MS); i++) {
@@ -73,7 +71,7 @@ function harness() {
     }
   }
   return {
-    clock, machine, submits, windows, traces, displays,
+    clock, machine, submits, windows, displays,
     speak: seconds => feed(seconds, VOICE_RMS),
     quiet: seconds => feed(seconds, NOISE_RMS),
     noise: (seconds, rms) => feed(seconds, rms),
@@ -159,6 +157,35 @@ scenario('只有噪音/风声、没有文字：不开窗、永不提交', () => 
   assert.equal(h.submits.length, 0, 'noise must never submit')
 })
 
+scenario('纯语气词 partial：不开窗、不显示', () => {
+  const h = harness()
+  h.partial('嗯')
+  h.partial('嗯。')
+  h.clock.advance(WINDOW + 200)
+  assert.equal(h.windows.length, 0, 'filler partials must not open the window')
+  assert.equal(h.submits.length, 0, 'filler partials must never submit')
+  assert.ok(h.displays.every(d => d.text === ''), 'filler must not reach the live area')
+})
+
+scenario('纯语气词 final：不进正文、不提交', () => {
+  const h = harness()
+  h.final('嗯。')
+  h.clock.advance(WINDOW + 200)
+  assert.equal(h.windows.length, 0, 'a filler-only final must not open the window')
+  assert.equal(h.submits.length, 0, 'a filler-only final must never submit')
+})
+
+scenario('尾部幻听语气词：只提交正文', () => {
+  const h = harness()
+  h.partial('今天天气不错')
+  h.final('今天天气不错。')
+  h.final('嗯。')
+  h.final('呃，')
+  h.quiet(3)
+  assert.equal(h.submits.length, 1)
+  assert.equal(h.submits[0].text, '今天天气不错。')
+})
+
 scenario('断线挂起：计时冻结、文本保留、恢复后重新计时', () => {
   const h = harness()
   h.partial('保留我')
@@ -196,9 +223,10 @@ scenario('60 秒上限：连续说话也强制提交', () => {
     h.partial(`长${++i}`)
   }
   assert.equal(h.submits.length, 1)
+  // Continuous speech keeps resetting the silence timer, so only the 60 s cap
+  // can have submitted here (the trace-reason assertion is gone with the
+  // diagnostic trace).
   assert.ok(h.submits[0].t <= 60_100, `cap flush at ~60s, got ${h.submits[0].t}`)
-  const flush = [...h.traces].reverse().find(entry => entry.event === 'flush')
-  assert.equal(flush.detail.reason, 'cap')
 })
 
 scenario('重复刷同一 partial：不刷新计时器', () => {

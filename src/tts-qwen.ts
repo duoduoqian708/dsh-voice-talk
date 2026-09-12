@@ -43,6 +43,34 @@ interface QwenUpstream {
   append(text: string): void
   finish(): void
   close(): void
+  /** TEMP usage meter snapshot (diagnosis only). */
+  stats(): QwenUsageStats
+}
+
+/** TEMP usage meter: local append volume + the vendor's own usage report. */
+interface QwenUsageStats {
+  /** Characters appended to the vendor (JS string length). */
+  appended: number
+  /** Official billing count of the appended text (a hanzi counts as 2). */
+  billedChars: number
+  /** Audio seconds returned by the vendor (24 kHz 16-bit mono). */
+  audioSec: number
+}
+
+/** Official TTS billing-count rule: a hanzi counts as 2, everything else
+ *  (including CJK punctuation and kana) as 1. Validated against the bill:
+ *  the bill's per-minute 字 quantity matches this count exactly. */
+function billingChars(text: string): number {
+  let count = 0
+  for (const char of text) {
+    const cp = char.codePointAt(0) ?? 0
+    const hanzi = (cp >= 0x3400 && cp <= 0x4dbf)
+      || (cp >= 0x4e00 && cp <= 0x9fff)
+      || (cp >= 0xf900 && cp <= 0xfaff)
+      || (cp >= 0x20000 && cp <= 0x2fa1f)
+    count += hanzi ? 2 : 1
+  }
+  return count
 }
 
 interface QwenUpstreamHandlers {
@@ -99,6 +127,10 @@ async function openUpstream(apiKey: string, params: QwenSessionParams, handlers:
     let ready = false
     let ended = false
     let eventSeq = 0
+    // TEMP usage meter (diagnosis only).
+    let appended = 0
+    let billed = 0
+    let audioBytes = 0
     const socket = new WebSocket(upstreamUrl(params), {
       headers: { Authorization: `Bearer ${apiKey}` },
       handshakeTimeout: 15_000,
@@ -117,12 +149,17 @@ async function openUpstream(apiKey: string, params: QwenSessionParams, handlers:
       ready = true
       send({ type: 'session.update', session: sessionConfig(params) })
       resolveUp({
-        append: text => send({ type: 'input_text_buffer.append', text }),
+        append: text => {
+          appended += text.length
+          billed += billingChars(text)
+          send({ type: 'input_text_buffer.append', text })
+        },
         finish: () => send({ type: 'session.finish' }),
         close: () => {
           ended = true
           try { socket.close() } catch { /* already down */ }
         },
+        stats: () => ({ appended, billedChars: billed, audioSec: audioBytes / 48_000 }),
       })
     })
     socket.on('message', (data: Buffer) => {
@@ -133,7 +170,9 @@ async function openUpstream(apiKey: string, params: QwenSessionParams, handlers:
         return
       }
       if (event.type === 'response.audio.delta' && event.delta !== undefined && event.delta !== '') {
-        handlers.onAudio(Buffer.from(event.delta, 'base64'))
+        const chunk = Buffer.from(event.delta, 'base64')
+        audioBytes += chunk.length
+        handlers.onAudio(chunk)
         return
       }
       if (event.type === 'session.finished') {
@@ -144,6 +183,8 @@ async function openUpstream(apiKey: string, params: QwenSessionParams, handlers:
       }
       if (event.type === 'error') {
         const detail = event.error?.message ?? event.error?.code ?? '未知错误'
+        // TEMP diagnostic trace (lookahead pacing).
+        console.log('[voice-tts-trace] upstream-error', detail)
         ended = true
         handlers.onError(`千问合成失败：${detail}`)
         try { socket.close() } catch { /* already down */ }
@@ -165,6 +206,8 @@ export async function synthQwenOnce(ctx: Context, text: string, params: QwenSess
   const apiKey = await resolveApiKey(ctx)
   const { WebSocket } = await import('ws')
   const chunks: Buffer[] = []
+  // TEMP usage meter (diagnosis only).
+  const startedAt = Date.now()
   await new Promise<void>((resolve, reject) => {
     let ended = false
     let eventSeq = 0
@@ -215,6 +258,11 @@ export async function synthQwenOnce(ctx: Context, text: string, params: QwenSess
   })
   const pcm = Buffer.concat(chunks)
   if (pcm.length === 0) throw new Error('千问合成返回了空音频')
+  console.log(
+    `[voice-usage] tts-trylisten model=${params.model?.trim() || QWEN_DEFAULT_MODEL} chars=${text.length} ` +
+    `billedChars=${billingChars(text)} audioSec=${(pcm.length / 48_000).toFixed(2)} ` +
+    `sessionMs=${Date.now() - startedAt} est=¥${(billingChars(text) / 10_000).toFixed(4)}`,
+  )
   return wavFromPcm24k(pcm)
 }
 
@@ -247,6 +295,10 @@ interface ClientFrame {
   model?: string
   endpoint?: string
   text?: string
+  /** TEMP diagnostic: playback-hole counters sent right before the close. */
+  count?: number
+  maxMs?: number
+  totalMs?: number
 }
 
 let clientWss: import('ws').WebSocketServer | null = null
@@ -271,25 +323,46 @@ async function serveQwenClient(ctx: Context, ws: import('ws').WebSocket): Promis
   let upstream: QwenUpstream | null = null
   let closed = false
   let idleTimer: ReturnType<typeof setTimeout> | null = null
+  // TEMP usage meter (diagnosis only).
+  let sessionStart = 0
+  let model = QWEN_DEFAULT_MODEL
+  let voice = ''
+  let endReason = 'ws-close'
+  let usageLogged = false
+  /** TEMP diagnostic: the client's playback holes for this session. */
+  let gapStats: { count: number; maxMs: number; totalMs: number } | null = null
   const bumpIdle = (): void => {
     if (idleTimer !== null) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => tearDown(), IDLE_TIMEOUT_MS)
+    idleTimer = setTimeout(() => tearDown('idle-teardown'), IDLE_TIMEOUT_MS)
   }
   const sendJson = (payload: Record<string, unknown>): void => {
     if (closed) return
     try { ws.send(JSON.stringify(payload)) } catch { /* socket raced down */ }
   }
-  const tearDown = (): void => {
+  const tearDown = (reason?: string): void => {
     if (closed) return
     closed = true
+    if (reason !== undefined) endReason = reason
     if (idleTimer !== null) clearTimeout(idleTimer)
     idleTimer = null
+    const stats = upstream?.stats() ?? null
+    if (stats !== null && !usageLogged) {
+      usageLogged = true
+      // Char-billed (hanzi count as 2): the local count is the billing basis.
+      console.log(
+        `[voice-usage] tts model=${model} voice=${voice === '' ? 'default' : voice} chars=${stats.appended} ` +
+        `billedChars=${stats.billedChars} audioSec=${stats.audioSec.toFixed(2)} ` +
+        `gaps=${gapStats?.count ?? '-'} maxGapMs=${gapStats?.maxMs ?? '-'} totalGapMs=${gapStats?.totalMs ?? '-'} ` +
+        `sessionMs=${sessionStart === 0 ? 0 : Date.now() - sessionStart} ended=${endReason} ` +
+        `est=¥${(stats.billedChars / 10_000).toFixed(4)}`,
+      )
+    }
     upstream?.close()
     upstream = null
     try { ws.close() } catch { /* already down */ }
   }
-  ws.on('close', () => tearDown())
-  ws.on('error', () => tearDown())
+  ws.on('close', () => tearDown('ws-close'))
+  ws.on('error', () => tearDown('ws-error'))
   ws.on('message', (data: Buffer, isBinary: boolean) => {
     if (isBinary || closed) return
     bumpIdle()
@@ -302,6 +375,9 @@ async function serveQwenClient(ctx: Context, ws: import('ws').WebSocket): Promis
     if (frame.type === 'hello') {
       upstream?.close()
       upstream = null
+      sessionStart = Date.now()
+      model = frame.model?.trim() || QWEN_DEFAULT_MODEL
+      voice = frame.voice ?? ''
       void (async () => {
         try {
           const apiKey = await resolveApiKey(ctx)
@@ -314,19 +390,23 @@ async function serveQwenClient(ctx: Context, ws: import('ws').WebSocket): Promis
           upstream = await openUpstream(apiKey, params, {
             onAudio: chunk => {
               if (!closed) {
+                // The client sends nothing while it plays the stream: incoming
+                // audio is the liveness signal that must keep the session off
+                // the 120 s client-idle teardown.
+                bumpIdle()
                 try { ws.send(chunk, { binary: true }) } catch { /* raced down */ }
               }
             },
             onFinished: () => sendJson({ type: 'finished' }),
             onError: message => {
               sendJson({ type: 'error', error: message })
-              tearDown()
+              tearDown('upstream-error')
             },
           })
           sendJson({ type: 'ready' })
         } catch (error) {
           sendJson({ type: 'error', ...bridgeErrorPayload(error) })
-          tearDown()
+          tearDown('hello-fail')
         }
       })()
       return
@@ -340,6 +420,10 @@ async function serveQwenClient(ctx: Context, ws: import('ws').WebSocket): Promis
       upstream?.finish()
       return
     }
-    if (frame.type === 'bye') tearDown()
+    if (frame.type === 'gapstats') {
+      gapStats = { count: frame.count ?? 0, maxMs: frame.maxMs ?? 0, totalMs: frame.totalMs ?? 0 }
+      return
+    }
+    if (frame.type === 'bye') tearDown('bye')
   })
 }

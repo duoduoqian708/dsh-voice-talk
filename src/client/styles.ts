@@ -913,12 +913,14 @@ body[data-ds-dark-theme] .dsh-voice-speaker-pop.is-portal .dsh-voice-speaker-che
   scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.18) transparent;
 }
 .dsh-voice-question-options { list-style: none; margin: 7px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.dsh-voice-question-option { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; line-height: 1.45; color: #1D1D1F; opacity: .72; }
+.dsh-voice-question-option { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; font-size: 12.5px; line-height: 1.45; color: #1D1D1F; opacity: .72; }
 .dsh-voice-question-option[data-picked='true'] { opacity: 1; font-weight: 600; }
 .dsh-voice-question-mark { flex: none; width: 14px; text-align: center; font-size: 11px; color: #86868B; }
 .dsh-voice-question-option[data-picked='true'] .dsh-voice-question-mark { color: #34C759; }
-.dsh-voice-question-label { flex: none; }
-.dsh-voice-question-desc { flex: 1; min-width: 0; font-size: 11.5px; color: #86868B; }
+.dsh-voice-question-label { flex: 1 1 0; min-width: 0; }
+/* The description takes its own line: a long LABEL used to squeeze it into a
+   one-character column (label was flex: none, desc flex: 1 min-width: 0). */
+.dsh-voice-question-desc { flex: 1 1 100%; min-width: 0; margin-left: 21px; font-size: 11.5px; color: #86868B; }
 .dsh-voice-question-free { margin-top: 5px; font-size: 11.5px; color: #86868B; }
 .dsh-voice-question-picked { margin-top: 7px; font-size: 12px; font-weight: 600; color: #007AFF; }
 .dsh-voice-question[data-settled='false'] .dsh-voice-question-picked { display: none; }

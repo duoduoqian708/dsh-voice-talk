@@ -249,10 +249,11 @@ function themeExtras(theme: string, value: Required<VoiceSettings>): Record<stri
 }
 
 /** The listening engines: same credential refs as their 说 twins share. */
-const ASR_ENGINES: readonly { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; setupUrl?: string }[] = [
+const ASR_ENGINES: readonly { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; priceKey?: VoiceKey; setupUrl?: string }[] = [
   {
     id: 'qwen', labelKey: 'theme.qwen', refs: ['VOICE_QWEN_API_KEY'],
     noteKey: 'theme.asrQwenNote',
+    priceKey: 'theme.asrQwenPrice',
   },
   {
     id: 'xfyun', labelKey: 'theme.xfyun', refs: ['VOICE_XF_APP_ID', 'VOICE_XF_API_KEY', 'VOICE_XF_API_SECRET'],
@@ -260,6 +261,20 @@ const ASR_ENGINES: readonly { id: string; labelKey: VoiceKey; refs: readonly str
     setupUrl: 'https://console.xfyun.cn/services/iat',
   },
 ]
+
+/** Engines hidden from the settings UI while Qwen is the only cloud engine:
+ *  the theme registrations, bridges and i18n keys stay, so restoring one is
+ *  a one-line change here. */
+const HIDDEN_ENGINES = new Set(['xfyun'])
+
+/** Aliyun expense-detail page for the CURRENT month (local time): the billing
+ *  cycle parameter must never be hard-coded. */
+function billingUrl(): string {
+  const now = new Date()
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  return 'https://billing-cost.console.aliyun.com/finance/expense-report/expense-detail-by-instance'
+    + `?BillingCycle=${month}&StatisticItem=DEFAULT_CHARGE_ITEM&StatisticCycle=HOURLY`
+}
 
 /** The 听 modal's per-engine settings fields (model/endpoint override). */
 const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: VoiceKey; hint?: VoiceKey; placeholder?: string }[]> = {
@@ -281,7 +296,7 @@ const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: VoiceKey
 function AsrRow({
   engine, value, credentials, set, refreshKey, disabled, onActivate, onRefresh, t,
 }: {
-  engine: { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; setupUrl?: string }
+  engine: { id: string; labelKey: VoiceKey; refs: readonly string[]; noteKey?: VoiceKey; priceKey?: VoiceKey; setupUrl?: string }
   value: Required<VoiceSettings>
   credentials: VoiceCardProps['credentials']
   set(field: string, value: unknown): void
@@ -326,6 +341,14 @@ function AsrRow({
           <span className={`dsh-voice-engine-name${active ? ' is-active' : ''}`}>{t(engine.labelKey)}</span>
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
         </div>
+        {engine.noteKey !== undefined && (
+          <p className='dsh-voice-engine-note'>{t(engine.priceKey ?? engine.noteKey)}</p>
+        )}
+        {engine.id === 'qwen' && (
+          <p className='dsh-voice-setup-note'>
+            <a href={billingUrl()} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>{t('modal.billingLink')}</a>
+          </p>
+        )}
       </div>
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
@@ -498,6 +521,11 @@ function EngineRow({
           <span className={`dsh-voice-engine-status${configured === false ? ' is-missing' : ''}`}>{statusWord}</span>
         </div>
         {theme.noteKey !== undefined && <p className='dsh-voice-engine-note'>{t(theme.noteKey)}</p>}
+        {theme.id === 'qwen' && (
+          <p className='dsh-voice-setup-note'>
+            <a href={billingUrl()} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>{t('modal.billingLink')}</a>
+          </p>
+        )}
       </div>
       <div className='dsh-voice-provider-actions'>
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
@@ -660,7 +688,7 @@ function ProviderModal({
       </div>
       {(variant?.setupUrl ?? theme.setupUrl) !== undefined && (
         <p className='dsh-voice-setup-note'>
-          {variant?.note ?? (theme.noteKey !== undefined ? t(theme.noteKey) : '')} <a href={(variant?.setupUrl ?? theme.setupUrl)!} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>{t('modal.register')}</a>
+          {variant?.note !== undefined ? `${variant.note} ` : ''}<a href={(variant?.setupUrl ?? theme.setupUrl)!} target='_blank' rel='noreferrer' className='dsh-voice-setup-link'>{t('modal.register')}</a>
         </p>
       )}
       {(refs.length > 0 || fields.length > 0) && <div className='dsh-voice-modal-divider'>{t('modal.serviceConfig')}</div>}
@@ -841,7 +869,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials, t }: VoiceCa
 
         <div className='dsh-voice-panel-sec'>
           <div className='dsh-voice-panel-title'>{t('card.speak')}</div>
-          {listVoiceThemes().map(theme => (
+          {listVoiceThemes().filter(theme => !HIDDEN_ENGINES.has(theme.id)).map(theme => (
             <EngineRow
               key={theme.id}
               theme={theme}
@@ -860,7 +888,7 @@ export function VoiceSettingsCard({ useVoiceCard, set, credentials, t }: VoiceCa
 
         <div className='dsh-voice-panel-sec'>
           <div className='dsh-voice-panel-title'>{t('card.hear')}</div>
-          {ASR_ENGINES.map(engine => (
+          {ASR_ENGINES.filter(engine => !HIDDEN_ENGINES.has(engine.id)).map(engine => (
             <AsrRow
               key={engine.id}
               engine={engine}

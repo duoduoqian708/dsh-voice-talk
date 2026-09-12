@@ -54,6 +54,15 @@ const QWEN_ASR_ENDPOINT = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime'
 /** Upstream guard: a browser session silent this long is torn down. */
 const IDLE_TIMEOUT_MS = 120_000
 
+/** Server-VAD onset threshold. 0.0 (the vendor's recommendation for
+ *  continuous speech) also reads room noise as speech, which makes the model
+ *  hallucinate filler ("嗯") on non-speech audio; the env override exists for
+ *  a real-machine A/B (DSH_VOICE_VAD_THRESHOLD=0.1 …) without a rebuild. */
+const VAD_THRESHOLD = ((): number => {
+  const raw = Number(process.env['DSH_VOICE_VAD_THRESHOLD'])
+  return Number.isFinite(raw) ? Math.min(1, Math.max(0, raw)) : 0
+})()
+
 /** Map a BCP-47 tag to the vendor's transcription language ('zh'/'en'/…). */
 function asrLanguage(lang: string | undefined): string {
   const tag = (lang ?? '').trim().toLowerCase()
@@ -80,7 +89,7 @@ function sessionConfig(lang: string): Record<string, unknown> {
     // 800ms end-point stays, since the loop's flush window assumes it.
     turn_detection: {
       type: 'server_vad',
-      threshold: 0.0,
+      threshold: VAD_THRESHOLD,
       silence_duration_ms: 800,
     },
   }
@@ -97,6 +106,8 @@ interface AsrUpstreamHandlers {
   /** The vendor's VAD heard speech onset (no text yet): a liveness signal the
    *  loop must not mistake for the user pausing. */
   onActivity(): void
+  /** The vendor's VAD closed the speech segment (the billing unit). */
+  onSpeechEnd(): void
   onError(message: string): void
   /** Upstream ended without a final (network drop, vendor cap) — the bridge
    *  closes the browser link quietly so it reconnects with a fresh session. */
@@ -172,6 +183,10 @@ async function openQwenUpstream(apiKey: string, params: AsrSessionParams, handle
       }
       if (event.type === 'input_audio_buffer.speech_started') {
         handlers.onActivity()
+        return
+      }
+      if (event.type === 'input_audio_buffer.speech_stopped') {
+        handlers.onSpeechEnd()
         return
       }
       if (event.type === 'conversation.item.input_audio_transcription.text') {
@@ -351,6 +366,9 @@ interface AsrClientFrame {
 
 let asrClientWss: import('ws').WebSocketServer | null = null
 
+/** Live browser↔upstream ASR sessions (a value > 1 means duplicate meters). */
+let activeAsrSessions = 0
+
 /** Register the `/voice-asr/<vendor>` HTTP upgrade (mirrors /voice-tts/qwen). */
 export function registerAsrUpgrade(ctx: Context, vendor: 'qwen' | 'xfyun'): WebUpgradeRoute {
   return {
@@ -372,51 +390,79 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
   let upstream: AsrUpstream | null = null
   let closed = false
   let idleTimer: ReturnType<typeof setTimeout> | null = null
-  /** TEMP diagnostic trace: shows up in the dsh web log as [voice-asr-trace]. */
-  const trace = (...parts: unknown[]): void => console.log('[voice-asr-trace]', vendor, ...parts)
-  let tracedFirst = false
-  const firstTrace = (kind: string): void => {
-    if (tracedFirst) return
-    tracedFirst = true
-    trace('upstream-first', kind)
-  }
+  /** [voice-usage] accounting: 16 kHz 16-bit mono = 32000 bytes per streamed second. */
+  let audioBytes = 0
+  /** Effective speech seconds via the vendor VAD (the actual billing unit). */
+  let speechMs = 0
+  let speechStartedAt = 0
+  /** The Qwen realtime protocol emits VAD events, so "no event" means "no
+   *  speech" (billed zero); iFlytek iat has no such events and falls back to
+   *  the streamed seconds. */
+  let vadSeen = vendor === 'qwen'
+  let startedAt = 0
+  let counted = false
+  let endReason = 'ws-close'
+  let model = ''
   const bumpIdle = (): void => {
     if (idleTimer !== null) clearTimeout(idleTimer)
-    idleTimer = setTimeout(() => { trace('idle-teardown'); tearDown() }, IDLE_TIMEOUT_MS)
+    idleTimer = setTimeout(() => tearDown('idle-teardown'), IDLE_TIMEOUT_MS)
   }
   const sendJson = (payload: Record<string, unknown>): void => {
     if (closed) return
     try { ws.send(JSON.stringify(payload)) } catch { /* socket raced down */ }
   }
-  const tearDown = (): void => {
+  const tearDown = (reason?: string): void => {
     if (closed) return
     closed = true
+    if (reason !== undefined) endReason = reason
     if (idleTimer !== null) clearTimeout(idleTimer)
     idleTimer = null
     upstream?.close()
     upstream = null
+    if (speechStartedAt !== 0) { speechMs += Date.now() - speechStartedAt; speechStartedAt = 0 }
+    if (counted) {
+      counted = false
+      activeAsrSessions = Math.max(0, activeAsrSessions - 1)
+      const streamedSeconds = audioBytes / 32_000
+      const speechSeconds = speechMs / 1000
+      // The vendor bills effective speech seconds (validated against the
+      // bill); without VAD events (iFlytek) the streamed seconds stand in.
+      const seconds = vadSeen ? speechSeconds : streamedSeconds
+      // TEMP usage meter (diagnosis only).
+      console.log(
+        `[voice-usage] asr vendor=${vendor} model=${model} seconds=${seconds.toFixed(2)} ` +
+        `streamedSeconds=${streamedSeconds.toFixed(2)} speechSeconds=${speechSeconds.toFixed(2)} ` +
+        `sessionMs=${startedAt === 0 ? 0 : Date.now() - startedAt} concurrent=${activeAsrSessions} ` +
+        `ended=${endReason} est=¥${(seconds * 0.00033).toFixed(4)}`,
+      )
+    }
     try { ws.close() } catch { /* already down */ }
   }
   /** Vendor-agnostic events → the browser's thin protocol. iat is one
    *  connection per utterance: after its final, the bridge drops the browser
    *  link so the browser's reconnect lands on a fresh upstream session. */
   const upstreamOut = {
-    onPartial: (text: string): void => { firstTrace('interim'); if (text !== '') sendJson({ type: 'interim', text }) },
+    onPartial: (text: string): void => { if (text !== '') sendJson({ type: 'interim', text }) },
     onFinal: (text: string): void => {
-      firstTrace('final')
       sendJson({ type: 'final', text })
       if (vendor === 'xfyun') tearDown()
     },
-    onActivity: (): void => { firstTrace('activity'); sendJson({ type: 'activity' }) },
-    onError: (message: string): void => {
-      trace('upstream-error', message)
-      sendJson({ type: 'error', error: message })
-      tearDown()
+    onActivity: (): void => {
+      vadSeen = true
+      if (speechStartedAt === 0) speechStartedAt = Date.now()
+      sendJson({ type: 'activity' })
     },
-    onClosed: () => { trace('upstream-closed'); tearDown() },
+    onSpeechEnd: (): void => {
+      if (speechStartedAt !== 0) { speechMs += Date.now() - speechStartedAt; speechStartedAt = 0 }
+    },
+    onError: (message: string): void => {
+      sendJson({ type: 'error', error: message })
+      tearDown('upstream-error')
+    },
+    onClosed: () => tearDown('upstream-closed'),
   }
-  ws.on('close', () => tearDown())
-  ws.on('error', () => tearDown())
+  ws.on('close', () => tearDown('ws-close'))
+  ws.on('error', () => tearDown('ws-error'))
   ws.on('message', (data: Buffer, isBinary: boolean) => {
     if (closed) return
     if (!isBinary) {
@@ -430,10 +476,11 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
       if (frame.type === 'hello') {
         upstream?.close()
         upstream = null
+        startedAt = Date.now()
+        model = frame.model?.trim() || (vendor === 'qwen' ? QWEN_ASR_MODEL : 'iat')
         void (async () => {
           try {
             const lang = asrLanguage(frame.lang)
-            trace('hello', { lang, model: frame.model })
             upstream = vendor === 'qwen'
               ? await openQwenUpstream(await resolveApiKey(ctx), {
                 lang,
@@ -441,25 +488,26 @@ async function serveAsrClient(ctx: Context, ws: import('ws').WebSocket, vendor: 
                 endpoint: frame.endpoint,
               }, upstreamOut)
               : await openXfyunUpstream(ctx, lang, frame.endpoint, upstreamOut)
-            trace('ready')
+            activeAsrSessions += 1
+            counted = true
             sendJson({ type: 'ready' })
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            trace('hello-fail', message)
             console.error('[voice-asr] hello 失败:', vendor, message)
             // Send past the closed-guard: the upstream close event can race the
             // rejection here, and the browser must still learn WHY it failed.
             try { ws.send(JSON.stringify({ type: 'error', ...bridgeErrorPayload(error) })) } catch { /* down */ }
-            tearDown()
+            tearDown('hello-fail')
           }
         })()
         return
       }
-      if (frame.type === 'bye') tearDown()
+      if (frame.type === 'bye') tearDown('bye')
       return
     }
     // Binary = one raw PCM chunk from the browser mic.
     bumpIdle()
+    audioBytes += data.length
     upstream?.appendAudio(data)
   })
 }

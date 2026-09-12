@@ -12,6 +12,53 @@ import { bridgeErrorKey, type VoiceTranslate } from './locales.ts'
 const MARK_TICK_MS = 500
 /** Played audio subtracted before estimating, so the mark never leads the sound. */
 const MARK_LEAD_S = 0.25
+/** Cloud readout pace at rate 1.0, in characters per second. The marker rides
+ *  the playback clock — scaling the RECEIVED-audio fraction by the pushed
+ *  chars made it jump to the leading edge and freeze whenever the vendor's
+ *  synthesis lagged the pushed text. Calibrated per voice once a reply drains
+ *  (see observedRateByVoice). */
+const CLOUD_CHARS_PER_SEC = 4.5
+/** Observed chars/second per `voice@rate`, learned from drained replies. */
+const observedRateByVoice = new Map<string, number>()
+/** Playback start delay behind the first audio delta: the vendor streams at
+ *  roughly real time (server_commit), so without this cushion any late delta
+ *  left an audible hole ("卡顿"). */
+const JITTER_BUFFER_S = 2
+/** TTS lookahead window: text is appended to the vendor only while the
+ *  scheduled audio is shorter than this, so a barge-in does not pay for the
+ *  whole generated reply (the vendor bills appended characters). The window
+ *  also sets the append cadence: one small piece per gap, otherwise the
+ *  vendor's server_commit session errors with "no data timeout after flush".
+ *  OFF by default: with server_commit the vendor aborts when starved, and
+ *  pacing it from the playback clock is not reliable enough yet. */
+const USE_TTS_LOOKAHEAD = false
+const TTS_LEAD_SECONDS = 10
+/** If the (completed) tail stops draining this long, flush it anyway: a
+ *  suspended playback context must not hang the round on a held tail. */
+const TTS_HOLD_TIMEOUT_MS = 45_000
+/** Largest piece handed to the lookahead queue: the controller flushes at
+ *  the LAST sentence boundary, so a single push can carry a whole paragraph
+ *  and the window would have nothing finer to release. Small pieces also keep
+ *  the vendor fed often enough not to time out. */
+const TTS_PIECE_MAX_CHARS = 30
+
+/** Split an oversized piece at punctuation (hard cut as a fallback) so the
+ *  lookahead releases it gradually instead of all at once. */
+function splitForLookahead(text: string, max = TTS_PIECE_MAX_CHARS): string[] {
+  if (text.length <= max) return [text]
+  const parts: string[] = []
+  let rest = text
+  while (rest.length > max) {
+    const head = rest.slice(0, max)
+    let cut = -1
+    for (const match of head.matchAll(/[。！？；.!?;，,、\s]/g)) cut = (match.index ?? -1) + 1
+    const at = cut > max / 2 ? cut : max
+    parts.push(rest.slice(0, at))
+    rest = rest.slice(at)
+  }
+  if (rest !== '') parts.push(rest)
+  return parts
+}
 
 // ---- live readout level (call-face wave feed) -------------------------------
 // Both engines expose the level of the audio actually sounding right now:
@@ -404,9 +451,16 @@ class PcmStreamPlayer {
   #firstStart: number | null = null
   #sources = new Set<AudioBufferSourceNode>()
   #cancelled = false
+  /** Audible holes: deltas that arrived after the queue had drained. */
+  #gapCount = 0
+  #gapTotalMs = 0
+  #gapMaxMs = 0
   /** Playback schedule with per-chunk RMS, for the "sounding now" level. */
   #levels: { start: number; end: number; rms: number }[] = []
   readonly #t: VoiceTranslate
+  /** Fired as each scheduled chunk finishes sounding: a playback clock that
+   *  keeps working when background-tab timer throttling parks setInterval. */
+  onChunkEnded: (() => void) | null = null
 
   constructor(t: VoiceTranslate) {
     this.#t = t
@@ -437,16 +491,28 @@ class PcmStreamPlayer {
     source.buffer = buffer
     source.connect(this.#gain)
     const now = this.#context.currentTime
-    // First chunk starts immediately; later chunks chain at the exact sample
-    // boundary of the previous one.
-    if (this.#nextTime < now + 0.02) this.#nextTime = now + 0.02
+    // The first chunk starts behind the jitter buffer; later chunks chain at
+    // the exact sample boundary of the previous one. A chunk arriving after
+    // the queue drained can only resume "now" — count that audible hole.
+    if (this.#firstStart === null) {
+      this.#nextTime = now + JITTER_BUFFER_S
+    } else if (this.#nextTime < now + 0.02) {
+      const gapMs = (now + 0.02 - this.#nextTime) * 1000
+      this.#gapCount += 1
+      this.#gapTotalMs += gapMs
+      if (gapMs > this.#gapMaxMs) this.#gapMaxMs = gapMs
+      this.#nextTime = now + 0.02
+    }
     const start = this.#nextTime
     if (this.#firstStart === null) this.#firstStart = start
     source.start(start)
     this.#nextTime += buffer.duration
     this.#levels.push({ start, end: this.#nextTime, rms })
     this.#sources.add(source)
-    source.onended = () => { this.#sources.delete(source) }
+    source.onended = () => {
+      this.#sources.delete(source)
+      this.onChunkEnded?.()
+    }
   }
 
   /** RMS (0..1) of the chunk sounding right now; 0 in gaps and silence. */
@@ -465,22 +531,26 @@ class PcmStreamPlayer {
     return Math.max(0, this.#nextTime - this.#context.currentTime)
   }
 
+  /** Seconds sounded since the session's first chunk started scheduling. */
+  get playedSeconds(): number {
+    const first = this.#firstStart
+    return first === null ? 0 : Math.max(0, this.#context.currentTime - first)
+  }
+
+  /** Total audio seconds scheduled so far (end of the received timeline). */
+  get scheduledSeconds(): number {
+    const first = this.#firstStart
+    return first === null ? 0 : Math.max(0, this.#nextTime - first)
+  }
+
+  /** Audible holes: deltas that arrived after the queue had drained. */
+  get gapStats(): { count: number; maxMs: number; totalMs: number } {
+    return { count: this.#gapCount, maxMs: Math.round(this.#gapMaxMs), totalMs: Math.round(this.#gapTotalMs) }
+  }
+
   /** True once everything fed so far has finished playing. */
   get drained(): boolean {
     return this.pendingSeconds <= 0.01
-  }
-
-  /**
-   * Fraction (0..1) of the scheduled audio already sounding, biased backward
-   * by `leadSeconds` so the karaoke mark never runs ahead of the voice.
-   */
-  progress(leadSeconds: number): number {
-    const first = this.#firstStart
-    if (first === null) return 0
-    const total = this.#nextTime - first
-    if (total <= 0) return 0
-    const played = Math.max(0, this.#context.currentTime - first - leadSeconds)
-    return Math.min(1, played / total)
   }
 
   /** Stop now (barge-in / skip): unschedule everything, drop queued audio. */
@@ -550,8 +620,40 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     /** Cleaned chars appended to the vendor so far (the progress denominator). */
     let charsPushed = 0
     let lastReported = -1
+    /** Set when the vendor's `finished` frame lands: every audio delta has
+     *  been received by then, so the reply's final audio duration is known. */
+    let synthesisComplete = false
+    let finalTotalS = 0
+    const rateKey = `${opts.voiceName === '' ? 'default' : opts.voiceName}@${opts.rate.toFixed(2)}`
+    // Learned from an earlier drained reply of this voice; the base constant
+    // scaled by the session's speech rate until then.
+    const charsPerSec = observedRateByVoice.get(rateKey) ?? CLOUD_CHARS_PER_SEC * opts.rate
     let ticker: number | null = null
+    /** The client sends nothing while it plays the queued audio: a heartbeat
+     *  keeps the bridge's 120 s idle guard from tearing the session down
+     *  mid-playback (which ended the round with audio still sounding). */
+    let keepalive: number | null = null
+    const stopKeepalive = (): void => {
+      if (keepalive !== null) {
+        window.clearInterval(keepalive)
+        keepalive = null
+      }
+    }
+    /** TEMP diagnostic: send the playback-hole counters before the socket
+     *  closes, so the host usage line carries them next to the cost numbers. */
+    const reportGaps = (): void => {
+      const stats = player?.gapStats
+      if (stats === undefined || socket === null) return
+      try { socket.send(JSON.stringify({ type: 'gapstats', ...stats })) } catch { /* raced down */ }
+    }
     const pending: string[] = []
+    /** Pieces waiting for playback headroom (the lookahead window). */
+    const buffered: string[] = []
+    let finishSent = false
+    let bootstrapped = false
+    let lastReleaseAt = Date.now()
+    let awaitingAudio = false
+    let releasedAtPending = 0
     let resolveDone: (() => void) | null = null
     let failDone: ((error: Error) => void) | null = null
     const finished = new Promise<void>((resolve, reject) => {
@@ -577,6 +679,8 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       if (settled) return
       settled = true
       stopTick()
+      stopKeepalive()
+      reportGaps()
       socket?.close()
       player?.cancel()
       failDone?.(new Error(message))
@@ -585,6 +689,8 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
       if (settled) return
       settled = true
       stopTick()
+      stopKeepalive()
+      reportGaps()
       socket?.close()
       player?.cancel()
       resolveDone?.()
@@ -596,22 +702,76 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
         setTimeout(() => drain(), 100)
         return
       }
+      // Natural end only: learn this voice's real pace for the next reply.
+      const played = player?.playedSeconds ?? 0
+      if (played > 1 && charsPushed > 0) observedRateByVoice.set(rateKey, charsPushed / played)
       finalizeProgress()
       settled = true
+      stopKeepalive()
+      reportGaps()
       try { socket?.close() } catch { /* already down */ }
       resolveDone?.()
     }
-    /**
-     * Playback-driven marker: the audio clock says how much of the scheduled
-     * speech has sounded; the pushed-text total scales it to characters. The
-     * conservative lead keeps the estimate behind the voice, never ahead.
-     */
+    /** Karaoke marker: the playback clock × this reply's pace. Once the
+     *  vendor's `finished` lands the pace is the reply's TRUE average
+     *  (chars ÷ final audio seconds); before that the learned cross-reply pace
+     *  stands in. A constant speed never wobbles with the growing audio
+     *  timeline (the old fraction formula sped up and slowed down). */
     const reportEstimate = (): void => {
       if (settled || player === null) return
-      const estimate = Math.round(charsPushed * player.progress(MARK_LEAD_S))
+      const played = Math.max(0, player.playedSeconds - MARK_LEAD_S)
+      const rate = synthesisComplete && finalTotalS > 1 ? charsPushed / finalTotalS : charsPerSec
+      const estimate = Math.max(0, Math.min(charsPushed, Math.round(played * rate)))
       if (estimate === lastReported) return
       lastReported = estimate
       onProgress?.(estimate)
+    }
+    /** Append one piece to the vendor: the billed unit is the appended char. */
+    const sendAppend = (text: string): void => {
+      lastReleaseAt = Date.now()
+      charsPushed += text.length
+      socket?.send(JSON.stringify({ type: 'append', text }))
+    }
+    /** Release one buffered piece and wait for its audio to come back before
+     *  the next one: without that hysteresis the ticker keeps releasing while
+     *  a slow vendor has not yet synthesized, piling up appended-but-unheard
+     *  text that an interrupt still pays for. */
+    const releasePiece = (): void => {
+      releasedAtPending = player?.pendingSeconds ?? 0
+      awaitingAudio = true
+      sendAppend(buffered.shift()!)
+    }
+    /** Feed the vendor only while the audio headroom is under the window.
+     *  `done()` marks the text complete but does NOT flush: the tail drips out
+     *  as playback advances, so a barge-in never pays for text the vendor was
+     *  never given. `finish` goes out once every piece has been appended.
+     *  A stalled player (suspended context) is flushed after the hold timeout
+     *  instead of hanging the round. */
+    const pumpAppends = (): void => {
+      if (settled || !ready || socket === null || finishSent) return
+      if (ended && buffered.length > 0 && Date.now() - lastReleaseAt > TTS_HOLD_TIMEOUT_MS) {
+        for (const text of buffered.splice(0)) sendAppend(text)
+      }
+      if (buffered.length === 0) {
+        if (ended) {
+          finishSent = true
+          socket.send(JSON.stringify({ type: 'finish' }))
+        }
+        return
+      }
+      if (player === null) {
+        // Bootstrap: one piece opens synthesis; the rest waits for the clock.
+        if (!bootstrapped) {
+          bootstrapped = true
+          releasePiece()
+        }
+        return
+      }
+      if (awaitingAudio) {
+        if (player.pendingSeconds > releasedAtPending + 0.5) awaitingAudio = false
+        else return
+      }
+      if (player.pendingSeconds < TTS_LEAD_SECONDS) releasePiece()
     }
 
     try {
@@ -625,6 +785,12 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
           model: qwenParam(opts, 'model'),
           endpoint: qwenParam(opts, 'endpoint'),
         }))
+        stopKeepalive()
+        keepalive = window.setInterval(() => {
+          try {
+            if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'keepalive' }))
+          } catch { /* raced down */ }
+        }, 30_000)
       }
       socket.onmessage = (event) => {
         if (typeof event.data === 'string') {
@@ -636,14 +802,20 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
           }
           if (frame.type === 'ready') {
             ready = true
-            const queued = pending.splice(0)
-            for (const text of queued) {
-              socket?.send(JSON.stringify({ type: 'append', text }))
+            if (!USE_TTS_LOOKAHEAD) {
+              for (const text of pending.splice(0)) sendAppend(text)
+              return
             }
-            if (ended) socket?.send(JSON.stringify({ type: 'finish' }))
+            for (const text of pending.splice(0)) buffered.push(text)
+            pumpAppends()
             return
           }
           if (frame.type === 'finished') {
+            // Every delta has streamed by now: the reply's audio timeline is
+            // final, so its true average pace is known from here on.
+            finalTotalS = player?.scheduledSeconds ?? 0
+            synthesisComplete = true
+            if (finalTotalS > 1 && charsPushed > 0) observedRateByVoice.set(rateKey, charsPushed / finalTotalS)
             drain()
             return
           }
@@ -654,11 +826,16 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
           return
         }
         // Binary frame: one PCM delta → the gapless schedule.
-        if (player === null) player = new PcmStreamPlayer(this.#t)
+        if (player === null) {
+          player = new PcmStreamPlayer(this.#t)
+          const current = player
+          current.onChunkEnded = () => { if (player === current) pumpAppends() }
+        }
         player.push(event.data as ArrayBuffer)
         sawAudio = true
       }
       socket.onclose = () => {
+        stopKeepalive()
         if (!settled) {
           // The bridge closes after `finished` (normal) or on failure; an
           // un-signalled close with no audio at all is an error surface.
@@ -681,18 +858,23 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     const session: TtsSession = {
       push: (text) => {
         if (settled || ended || text === '') return
-        // Bookkeeping only: progress is driven by the audio clock below, not
-        // by the push position (that led the speaker by whole sentences).
-        charsPushed += text.length
-        if (!ready || socket === null) {
-          pending.push(text)
+        if (!USE_TTS_LOOKAHEAD) {
+          if (!ready || socket === null) pending.push(text)
+          else sendAppend(text)
           return
         }
-        socket.send(JSON.stringify({ type: 'append', text }))
+        // Queued locally: the vendor only sees text the lookahead window
+        // releases (progress stays driven by the audio clock below).
+        for (const piece of splitForLookahead(text)) {
+          if (!ready || socket === null) pending.push(piece)
+          else buffered.push(piece)
+        }
+        pumpAppends()
       },
       done: () => {
+        if (ended) return
         ended = true
-        if (ready && socket !== null) socket.send(JSON.stringify({ type: 'finish' }))
+        pumpAppends()
       },
       cancel: () => {
         ended = true
@@ -703,7 +885,10 @@ export class QwenRealtimeTtsProvider implements TtsProvider {
     // Register on the provider so cancel() (skip / barge-in / hang-up) can
     // reach a session the controller created directly.
     this.#activeSession = session
-    ticker = window.setInterval(reportEstimate, MARK_TICK_MS)
+    ticker = window.setInterval(() => {
+      reportEstimate()
+      pumpAppends()
+    }, MARK_TICK_MS)
     return session
   }
 
