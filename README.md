@@ -30,7 +30,7 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 ### 2. 配置大模型
 
-设置 → 插件 → 语音对话。推荐千问：申请一个 DashScope API Key（https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS），填进千问的「设置」即可——模型和地址都已内置，充值就能用；想让「说」也用千问，点一下那一行的「启用」。讯飞也已内置，同样在设置页配置。
+在[阿里云百炼申请一个 API Key](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key)，然后到 设置 → 插件 → 语音对话，填进千问的「设置」即可；模型和地址已内置，充值就能用。目前支持千问，后续会引入更多语音引擎。
 
 ### 3. 开始使用
 
@@ -57,20 +57,6 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 - 中英文双语：跟随平台语言设置，界面完整本地化。
 - 密钥只存本机、绝不上传：浏览器接触不到密钥，语音请求由宿主代理转发。
 - 开源 MIT：代码可审计、可自建。
-
-## 常见问题
-
-**Q**：点了麦克风没反应，或者一直停在「聆听中」？
-
-**A**：到设置 → 插件 → 语音对话，确认「听」的引擎已配置密钥并启用。
-
-**Q**：有文字，但没有声音？
-
-**A**：确认「说」的引擎已启用；云端引擎检查密钥与余额；系统语音检查系统音量与所选音色。
-
-**Q**：说话打断不了播报？
-
-**A**：「说话打断播报」默认关闭，需要手动打开；建议戴耳机，否则扬声器的声音会被麦克风收录，影响打断判断。
 
 ## 彩蛋
 

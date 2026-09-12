@@ -30,7 +30,7 @@ Requires dsh ≥ 0.1.0-rc.7 (`web` profile), Chrome / Edge, microphone permissio
 
 ### 2. Configure a model
 
-Settings → Plugins → Voice chat. Qwen is recommended: get a DashScope API Key (https://bailian.console.aliyun.com/cn-beijing/model/market?capabilities=ASR%2CTTS) and paste it into Qwen's "Settings" — the model and endpoint are already built in, so top up and you are set; to make "Speak" use Qwen as well, click "Enable" on that row. iFlytek is built in as well and configured the same way.
+Get an API Key from [Alibaba Cloud Model Studio](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key), then paste it into Qwen's "Settings" under Settings → Plugins → Voice chat; the model and endpoint are built in. Qwen is the only engine for now; more will be added later.
 
 ### 3. Start talking
 
@@ -57,20 +57,6 @@ Changes on the settings page are persistent defaults; changes made in the call o
 - Bilingual UI (Chinese / English): follows the platform language setting.
 - Keys stay on your machine and are never uploaded: the browser never sees them, and speech requests are proxied by the host.
 - Open source under MIT: auditable and self-hostable.
-
-## FAQ
-
-**Q**: The mic does nothing, or it stays stuck on "Listening" — what now?
-
-**A**: Go to Settings → Plugins → Voice chat and make sure the "Listen" engine has credentials configured and enabled.
-
-**Q**: Replies show as text, but I hear nothing?
-
-**A**: Make sure the "Speak" engine is enabled; for cloud engines check the key and account balance, and for the system voice check the system volume and selected voice.
-
-**Q**: Speaking does not interrupt the readout?
-
-**A**: Barge-in is off by default — turn it on manually. Headphones are recommended; otherwise the speaker output is picked up by the mic and interferes with interruption detection.
 
 ## Easter egg
 
