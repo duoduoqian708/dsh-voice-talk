@@ -26,7 +26,7 @@ cd dsh-voice-talk && npm install && npm run build
 dsh plugin --profile web add /path/to/dsh-voice-talk
 ```
 
-需要 dsh ≥ 0.1.0-rc.7（`web` profile）、Chrome / Edge、麦克风权限与网络。
+需要 dsh 的 web profile：0.1.0-rc.7+（0.1.0-rc.x 与 0.1.5-rc.x 两代宿主线均已适配）；另需 Chrome / Edge、麦克风权限与网络。
 
 ### 2. 配置大模型
 

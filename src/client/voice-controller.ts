@@ -15,7 +15,7 @@
 
 import type { ConversationSnapshot, PartialAssistant } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TtsProvider, TtsSession } from './speech.ts'
-import { sessionFromSpeak } from './speech.ts'
+import { sessionFromSpeak, isSystemTtsSounding } from './speech.ts'
 import { CloudRecognizer } from './asr.ts'
 import { cleanStreamProse } from './readout.ts'
 import { isStopCommand, looksLikeEcho, normalizeForEcho } from './echo-guard.ts'
@@ -36,6 +36,11 @@ const REARM_COOLDOWN_MS = 900
 const ECHO_TAIL_WINDOW_MS = 3_500
 /** Give up watching for a reply after this long without snapshot progress. */
 const REPLY_TIMEOUT_MS = 180_000
+/** After the turn status says "not running", the assembled text can still
+ *  trail by a beat (host lines publish the session status and the conversation
+ *  text independently): wait this long for the final message/partial before
+ *  closing the readout, so the tail is never dropped unread. */
+const SETTLE_GRACE_MS = 350
 /** Minimum cleaned prose before a sentence boundary is worth a synthesis call. */
 const FLUSH_MIN_CHARS = 100
 /** Utterance cap: speaking this long without a pause forces a submit. */
@@ -468,6 +473,7 @@ export class VoiceController {
   readonly #utt: UtteranceMachine
   #rearmTimer: ReturnType<typeof setTimeout> | null = null
   #replyTimer: ReturnType<typeof setTimeout> | null = null
+  #settleTimer: ReturnType<typeof setTimeout> | null = null
   #echoMuteTimer: ReturnType<typeof setTimeout> | null = null
   /** Voice follow-up for a blocking approval/question (see #checkPending). */
   #pendingVoice: PendingVoiceState | null = null
@@ -757,6 +763,18 @@ export class VoiceController {
     this.#deps.notify('error', text)
   }
 
+  /**
+   * Whether echo judgment must run strict this instant. The platform
+   * speechSynthesis voice renders out of process: no echo canceller removes
+   * it from the mic, so its readout (selected, or still audible) needs the
+   * aggressive guard — a distorted capture must not pass as barge-in. Cloud
+   * themes whose audio the browser echo-cancels never run strict.
+   */
+  #strictEcho(): boolean {
+    if (isSystemTtsSounding()) return true
+    return resolveSettings(this.#deps.settings()).ttsTheme === 'system'
+  }
+
   #onFinalUtterance(text: string): void {
     if (text === '') return
     // Guard every entry: a late final can arrive after the loop is gone
@@ -776,7 +794,7 @@ export class VoiceController {
       const settings = resolveSettings(this.#deps.settings())
       const armed = settings.allowInterrupt
         && Date.now() - this.#speakingSince >= BARGE_IN_ARM_MS
-        && !looksLikeEcho(text, this.#spokenText ?? '')
+        && !looksLikeEcho(text, this.#spokenText ?? '', this.#strictEcho())
       if (!armed) {
         // Echo (or barge-in disabled): drop it AND mute briefly, so the same
         // speaker tail cannot re-finalize into a chain of echo triggers.
@@ -794,13 +812,18 @@ export class VoiceController {
     // own tail (playback "ended" but audio is still in the air). Run the echo
     // guard against the last readout for a short window.
     if (Date.now() < this.#spokenTailUntil && this.#spokenTail !== null) {
+      // The platform voice keeps bleeding after its session reports "ended"
+      // (and its ASR finals land late): while it is at risk the guard stays
+      // strict AND armed for the whole window, instead of being consumed by
+      // one distorted non-match.
+      const sounding = isSystemTtsSounding()
       // A bare option index is a plausible fast answer, never a tail capture
       // (the tail always carries words after its index) — let it through.
-      if (looksLikeEcho(text, this.#spokenTail) && !(this.#pendingVoice !== null && isBareIndexCommand(text))) {
+      if (looksLikeEcho(text, this.#spokenTail, this.#strictEcho()) && !(this.#pendingVoice !== null && isBareIndexCommand(text))) {
         this.#muteAfterEcho()
         return
       }
-      this.#spokenTailUntil = 0
+      if (!sounding) this.#spokenTailUntil = 0
     }
     // A blocking interaction owns the mic while it waits: the answer goes to
     // the matcher → protocol respond, never into the composer.
@@ -953,10 +976,12 @@ export class VoiceController {
     }
     this.#spokenText = null
     // The spoken ask is the echo reference for the answer window: the room
-    // hears it too, and a re-captured option must not count as a pick. The
-    // window is short — a person answers well after a 1s tail decays.
+    // hears it too, and a re-captured option must not count as a pick. Cloud
+    // audio the browser echo-cancels needs only the short window; the
+    // platform voice is not cancelled at all and keeps the full guard.
+    const systemVoice = resolveSettings(this.#deps.settings()).ttsTheme === 'system'
     this.#spokenTail = text
-    this.#spokenTailUntil = Date.now() + 1_000
+    this.#spokenTailUntil = Date.now() + (systemVoice ? ECHO_TAIL_WINDOW_MS : 1_000)
     if (this.#disposed || this.status.getSnapshot().mode !== 'loop') return
     if (this.#pendingVoice !== state) return
     state.awaiting = true
@@ -1105,6 +1130,7 @@ export class VoiceController {
    */
   #watchForReply(): void {
     this.#unsubscribeSnapshot?.()
+    this.#cancelSettle()
     // Newest-wins readout: a new prompt invalidates every finalized reply
     // sitting unspoken (generated while unwatched) — never read stale debt.
     this.#lastSpokenSeq = this.#latestAssistantSeq()
@@ -1130,6 +1156,28 @@ export class VoiceController {
     if (this.#disposed) return
     if (this.status.getSnapshot().phase !== 'thinking') return
     const snapshot = this.#deps.readSnapshot()
+    this.#flushSnapshotText(snapshot)
+    // Turn settled: the assembled text can still trail the status by a beat,
+    // so hold the watch through a short grace and close on the last read.
+    if (snapshot.running) {
+      this.#cancelSettle()
+      this.#bumpReplyTimer()
+      return
+    }
+    if (this.#sawTurnActivity) {
+      this.#scheduleSettle()
+      return
+    }
+    this.#bumpReplyTimer()
+  }
+
+  /**
+   * Feed one snapshot to the speaker: the in-flight step's partial prose
+   * sentence by sentence first, then every finalized step the watch has not
+   * seen. Offsets keep the pass idempotent, so the grace's catch-up read can
+   * only ever add text, never repeat any.
+   */
+  #flushSnapshotText(snapshot: ConversationSnapshot): void {
     const fresh = assistantMessagesOf(snapshot).filter(m => m.seq > this.#lastSpokenSeq)
     if (fresh.length > 0 || snapshot.partial !== null || snapshot.running) this.#sawTurnActivity = true
     // Live partial of the in-flight step feeds the speaker sentence by sentence.
@@ -1156,13 +1204,35 @@ export class VoiceController {
       this.#streamRaw = ''
       this.#streamFed = 0
     }
-    // Turn settled: close the session, play the tail, hand back to listening.
-    if (this.#sawTurnActivity && !snapshot.running) {
+  }
+
+  /**
+   * Close the readout after the settle grace, flushing whatever the
+   * conversation publish delivered meanwhile. A turn that reports running
+   * again (multi-step flutters) keeps the watch instead.
+   */
+  #scheduleSettle(): void {
+    if (this.#settleTimer !== null) return
+    this.#settleTimer = setTimeout(() => {
+      this.#settleTimer = null
+      if (this.#disposed) return
+      if (this.status.getSnapshot().phase !== 'thinking') return
+      const snapshot = this.#deps.readSnapshot()
+      this.#flushSnapshotText(snapshot)
+      if (snapshot.running) {
+        this.#bumpReplyTimer()
+        return
+      }
       this.#teardownReplyWatch()
       void this.#settleTurn()
-      return
-    }
-    this.#bumpReplyTimer()
+    }, SETTLE_GRACE_MS)
+  }
+
+  /** Drop a pending settle (turn resumed, new round, or teardown). */
+  #cancelSettle(): void {
+    if (this.#settleTimer === null) return
+    clearTimeout(this.#settleTimer)
+    this.#settleTimer = null
   }
 
   /**
@@ -1240,6 +1310,7 @@ export class VoiceController {
   #teardownReplyWatch(): void {
     this.#unsubscribeSnapshot?.()
     this.#unsubscribeSnapshot = null
+    this.#cancelSettle()
     if (this.#replyTimer !== null) {
       clearTimeout(this.#replyTimer)
       this.#replyTimer = null
@@ -1341,10 +1412,18 @@ export class VoiceController {
       this.#spokenTailUntil = 0
     }
     if (this.#rearmTimer !== null) clearTimeout(this.#rearmTimer)
-    this.#rearmTimer = setTimeout(() => {
+    const arm = (): void => {
       this.#rearmTimer = null
+      // The platform voice can still be audible after its session reports
+      // done (out-of-process playback): arming now would feed its tail
+      // straight back in. Wait the sound out, then listen.
+      if (isSystemTtsSounding()) {
+        this.#rearmTimer = setTimeout(arm, 250)
+        return
+      }
       this.#armListening()
-    }, REARM_COOLDOWN_MS)
+    }
+    this.#rearmTimer = setTimeout(arm, REARM_COOLDOWN_MS)
     // The round's readout is over: drop the karaoke marker.
     this.status.patch({ spokenTurn: null, spokenChars: 0, spokenFrom: 0 })
   }

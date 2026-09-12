@@ -52,6 +52,7 @@ export function listVoiceThemes(): readonly VoiceTheme[] {
 registerVoiceTheme({
   id: 'system',
   labelKey: 'theme.system',
+  noteKey: 'theme.systemNote',
   create: t => new SystemTtsProvider(t),
 })
 

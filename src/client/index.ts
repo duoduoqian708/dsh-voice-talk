@@ -19,8 +19,6 @@ import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the ctx.remote Context merge (credentials domain types).
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-// Type-only: IApiClient carries the credentials read/write face.
-import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the SlotMap merges of the conversation slots and the
 // conversation Context merge (ctx.conversation).
 import type { IConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -35,6 +33,7 @@ import { resolveSettings, VOICE_DEFAULTS, type VoiceSettings } from './voice-set
 import { MicButton, type VoiceInjected } from './components.tsx'
 import { CallOverlay } from './call-overlay.tsx'
 import { VoiceSettingsCard, type VoiceCardInjected, type VoiceCardState } from './settings-card.tsx'
+import { credentialsFace, sessionSnapshotFace } from './host-compat.ts'
 import { injectVoiceStyles } from './styles.ts'
 import { SnapshotStore } from './store.ts'
 import { NS, zh, en } from './locales.ts'
@@ -55,7 +54,7 @@ const controllers = new Map<SessionId, VoiceController>()
 export function apply(ctx: ClientContext): void {
   const sessions = ctx.sessions
   const conversation = ctx.conversation
-  const api = (ctx.get('connection') as ConnectionHandle).api
+  const credentials = credentialsFace(ctx)
   injectVoiceStyles()
   // Bilingual copy: the platform locale service owns the active language and
   // re-renders every slot entry whose registration declares `locale: NS`,
@@ -77,6 +76,7 @@ export function apply(ctx: ClientContext): void {
     if (binding === undefined) {
       throw new Error(`voice-talk: no session binding for ${sessionId}`)
     }
+    const snapshotFace = sessionSnapshotFace(ctx, binding, sessionId)
     controller = new VoiceController({
       input: {
         setDraft: (text) => {
@@ -93,8 +93,8 @@ export function apply(ctx: ClientContext): void {
           console.error('[dsh-voice-talk] notify failed:', error)
         }
       },
-      readSnapshot: () => binding.session.getSnapshot(),
-      subscribeSnapshot: listener => binding.session.subscribe(listener),
+      readSnapshot: snapshotFace.readSnapshot,
+      subscribeSnapshot: snapshotFace.subscribeSnapshot,
       settings: settingsNow,
       t,
     })
@@ -213,7 +213,7 @@ export function apply(ctx: ClientContext): void {
     inject: (): VoiceCardInjected => ({
       hooks: { voiceCard: cardStore },
       set: (field, value) => { void settingsScope.set(field, value).catch(error => console.error('[dsh-voice-talk] settings write failed:', error)) },
-      credentials: api.credentials,
+      credentials,
     }),
   }, VoiceSettingsCard))
 }

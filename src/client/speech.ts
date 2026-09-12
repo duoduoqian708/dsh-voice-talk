@@ -166,6 +166,45 @@ export function sessionFromSpeak(provider: TtsProvider, opts: SpeakOptions, onIn
   }
 }
 
+/* ---- platform-voice activity (shared wave feed + echo policy) ---------------
+ * speechSynthesis renders out of process: no Web Audio tap can measure its
+ * output and no echo canceller removes it from the mic. The utterance
+ * lifecycle is all we can observe, so both consumers ride it: the call-face
+ * wave synthesizes a speech-shaped envelope from it, and the controller runs
+ * the STRICT echo guard while it lasts (captured readout is not impossible to
+ * re-recognize here, only to cancel). */
+
+/** Grace bridging the (near-instant) gaps between queued utterances. */
+const SYSTEM_ACTIVITY_GRACE_MS = 400
+let systemActivityAt = 0
+
+function markSystemActivity(): void {
+  systemActivityAt = Date.now()
+}
+
+/** Whether the platform voice is sounding (or paused < grace ago). */
+export function isSystemTtsSounding(): boolean {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    const synth = window.speechSynthesis
+    if (synth.speaking || synth.pending) return true
+  }
+  // Cancelled utterances never fire onend, so the grace stamp only extends
+  // from real playback events — a skip drops the level immediately.
+  return Date.now() - systemActivityAt < SYSTEM_ACTIVITY_GRACE_MS
+}
+
+/** Playback level 0..1 for the system voice; 0 while silent. The platform
+ *  exposes no amplitude, so this is a synthetic speech envelope (a slow
+ *  breath carrier under a syllable ripple) — the same "close enough" spirit
+ *  as the bars' procedural amp. */
+export function readSystemTtsLevel(): number {
+  if (!isSystemTtsSounding()) return 0
+  const t = Date.now() / 1000
+  const syllable = Math.pow(Math.abs(Math.sin(t * 9.2)), 0.7)
+  const breath = 0.62 + 0.38 * Math.sin(t * 1.8)
+  return Math.min(1, 0.22 + 0.55 * syllable * breath)
+}
+
 /**
  * The platform speechSynthesis engine (the built-in `system` voice theme).
  * Long readouts are queued as ~120-char sentence-bounded chunks so "skip"
@@ -260,12 +299,15 @@ export class SystemTtsProvider implements TtsProvider {
       // playback position): onstart claims the piece it becomes current on,
       // onboundary tracks within it, onend locks the piece complete.
       utterance.onstart = () => {
+        markSystemActivity()
         onProgress?.(base)
       }
       utterance.onboundary = (event) => {
+        markSystemActivity()
         onProgress?.(base + (event.charIndex ?? 0))
       }
       utterance.onend = () => {
+        markSystemActivity()
         onProgress?.(played)
         speaking = false
         if (settled) return
@@ -332,7 +374,11 @@ export class SystemTtsProvider implements TtsProvider {
           const voice = synth.getVoices().find(v => v.name === opts.voiceName)
           if (voice !== undefined) utterance.voice = voice
         }
+        utterance.onstart = () => {
+          markSystemActivity()
+        }
         utterance.onend = () => {
+          markSystemActivity()
           if (settled) return
           speakNext()
         }

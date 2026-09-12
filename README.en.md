@@ -26,7 +26,7 @@ cd dsh-voice-talk && npm install && npm run build
 dsh plugin --profile web add /path/to/dsh-voice-talk
 ```
 
-Requires dsh ≥ 0.1.0-rc.7 (`web` profile), Chrome / Edge, microphone permission and a network connection.
+Requires the dsh web profile: 0.1.0-rc.7+ (both the 0.1.0-rc.x and 0.1.5-rc.x host lines are supported); Chrome / Edge, microphone permission and a network connection are also needed.
 
 ### 2. Configure a model
 

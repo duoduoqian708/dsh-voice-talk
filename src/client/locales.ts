@@ -23,6 +23,7 @@ export const zh = {
   'card.wave': '声纹效果',
   'card.speak': '说 · 音色引擎',
   'card.hear': '听 · 语音识别',
+  'card.switchHint': '引擎已切换，建议刷新浏览器',
 
   // ---- engine rows ----------------------------------------------------------
   'engine.checking': '检查凭证中…',
@@ -36,6 +37,7 @@ export const zh = {
   'engine.preview': '试听',
   'engine.setup': '设置',
   'theme.system': '系统语音',
+  'theme.systemNote': '免费使用，音质取决于当前设备',
   'theme.qwen': '千问',
   'theme.xfyun': '讯飞',
   'theme.qwenNote': '约 1 元 / 万字符（一个汉字按 2 字符计）',
@@ -162,6 +164,7 @@ export const en: Record<VoiceKey, string> = {
   'card.wave': 'Voice wave',
   'card.speak': 'Speak · Voice engine',
   'card.hear': 'Listen · Speech recognition',
+  'card.switchHint': 'Engine switched — we recommend refreshing the browser',
 
   'engine.checking': 'Checking credentials…',
   'engine.active': 'Active',
@@ -174,6 +177,7 @@ export const en: Record<VoiceKey, string> = {
   'engine.preview': 'Preview',
   'engine.setup': 'Settings',
   'theme.system': 'System voice',
+  'theme.systemNote': 'Free to use; audio quality depends on your device',
   'theme.qwen': 'Qwen',
   'theme.xfyun': 'iFlytek',
   'theme.qwenNote': '≈¥1 per 10k chars (a hanzi counts as 2)',

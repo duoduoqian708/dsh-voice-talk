@@ -6,6 +6,7 @@
 //     continuous, so sample-accurate scheduling removes every stitch seam).
 
 import type { TtsProvider, TtsSession, SpeakOptions } from './speech.ts'
+import { readSystemTtsLevel } from './speech.ts'
 import { bridgeErrorKey, type VoiceTranslate } from './locales.ts'
 
 /** Karaoke-marker progress cadence (players only — a sentence lasts seconds). */
@@ -61,10 +62,12 @@ function splitForLookahead(text: string, max = TTS_PIECE_MAX_CHARS): string[] {
 }
 
 // ---- live readout level (call-face wave feed) -------------------------------
-// Both engines expose the level of the audio actually sounding right now:
+// Every engine exposes the level of the audio actually sounding right now:
 // qwen pre-computes per-chunk RMS into the playback schedule; the bridge path
-// taps its Audio element through a MediaElementSource analyser. The wave
-// polls readTtsLevel() per frame — 0 = silence (flat idle line).
+// taps its Audio element through a MediaElementSource analyser; the platform
+// speechSynthesis voice has no audio node at all and reports a synthetic
+// envelope (speech.ts). The wave polls readTtsLevel() per frame — 0 = silence
+// (flat idle line).
 
 let activePlayer: PcmStreamPlayer | null = null
 let tapCtx: AudioContext | null = null
@@ -99,7 +102,9 @@ export function readTtsLevel(): number {
     }
     return Math.min(1, Math.sqrt(sum / tapData.length) * 6)
   }
-  return activePlayer?.level() ?? 0
+  // No browser audio graph holds the platform voice, so the wave would sit
+  // flat during a system readout; its synthetic envelope stands in.
+  return activePlayer?.level() ?? readSystemTtsLevel()
 }
 
 /** Sentence-bounded chunking shared by the chunked cloud providers. */

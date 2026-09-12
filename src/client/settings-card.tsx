@@ -293,6 +293,27 @@ const ASR_MODAL_FIELDS: Record<string, readonly { field: string; label: VoiceKey
  * (one engine, two directions), so the check mirrors EngineRow's — session
  * cache first, describe() IPC only when it misses.
  */
+/**
+ * One-second "engine switched" bubble for an enable click: local state plus a
+ * self-clearing timer, so the hint rides the row without a global toast face.
+ */
+function useSwitchFlash(): { flash: boolean; show: () => void } {
+  const [flash, setFlash] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current)
+  }, [])
+  const show = (): void => {
+    setFlash(true)
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      setFlash(false)
+    }, 1000)
+  }
+  return { flash, show }
+}
+
 function AsrRow({
   engine, value, credentials, set, refreshKey, disabled, onActivate, onRefresh, t,
 }: {
@@ -310,6 +331,7 @@ function AsrRow({
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [testOpen, setTestOpen] = useState(false)
+  const switchFlash = useSwitchFlash()
 
   useEffect(() => {
     const cacheKey = `asr:${engine.id}`
@@ -351,8 +373,9 @@ function AsrRow({
         )}
       </div>
       <div className='dsh-voice-provider-actions'>
+        {switchFlash.flash && <span className='dsh-voice-switch-flash' role='status'>{t('card.switchHint')}</span>}
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
-          onClick={onActivate}>
+          onClick={() => { onActivate(); switchFlash.show() }}>
           {active ? t('engine.enabled') : t('engine.enable')}
         </button>
         <button type='button' className='dsh-voice-provider-btn' onClick={() => setTestOpen(true)}>
@@ -485,6 +508,7 @@ function EngineRow({
   const needsSetup = theme.needsSetup === true && refs.length > 0
   const [configured, setConfigured] = useState<boolean | null>(needsSetup ? null : true)
   const [modalOpen, setModalOpen] = useState(false)
+  const switchFlash = useSwitchFlash()
 
   useEffect(() => {
     if (!needsSetup) return
@@ -528,8 +552,9 @@ function EngineRow({
         )}
       </div>
       <div className='dsh-voice-provider-actions'>
+        {switchFlash.flash && <span className='dsh-voice-switch-flash' role='status'>{t('card.switchHint')}</span>}
         <button type='button' className='dsh-voice-provider-btn is-primary' disabled={active}
-          onClick={onActivate}>
+          onClick={() => { onActivate(); switchFlash.show() }}>
           {active ? t('engine.enabled') : t('engine.enable')}
         </button>
         <button type='button' className='dsh-voice-provider-btn'

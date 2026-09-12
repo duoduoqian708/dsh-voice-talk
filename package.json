@@ -1,6 +1,6 @@
 {
   "name": "dsh-voice-talk",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Voice conversation mode for the DeepSeek Harness Web GUI: mic input with auto-submit, streaming spoken readout of replies, and a hands-free multi-turn loop with barge-in.",
   "type": "module",
   "main": "lib/index.js",
@@ -16,13 +16,15 @@
     "README.md",
     "LICENSE"
   ],
+  "engines": {
+    "dsh": "^0.1.0-rc.7 || ^0.1.5-rc.1"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale"
       ],
       "platform": "web"
@@ -32,6 +34,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test:utterance": "node scripts/check-utterance.mjs",
+    "test:echo": "node scripts/check-echo.mjs",
     "prepare": "node scripts/build.mjs"
   },
   "dependencies": {
@@ -40,8 +43,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.7",
-    "@deepseek-ai/dsh-settings": "^0.1.0-rc.7"
+    "@deepseek-ai/dsh-credentials": "^0.1.0-rc.7 || ^0.1.5-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.7 || ^0.1.5-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
