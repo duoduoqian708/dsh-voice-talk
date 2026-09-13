@@ -28,9 +28,11 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 Requires the dsh web profile: 0.1.0-rc.7+ (both the 0.1.0-rc.x and 0.1.5-rc.x host lines are supported); Chrome / Edge, microphone permission and a network connection are also needed.
 
-### 2. Configure a model
+### 2. Configure voice
 
-Get an API Key from [Alibaba Cloud Model Studio](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key), then paste it into Qwen's "Settings" under Settings → Plugins → Voice chat; the model and endpoint are built in. Qwen is the only engine for now; more will be added later.
+Speech playback defaults to the system voice, free of charge: voice and rate are both adjustable — pick a voice that suits you and tune the rate, and it sounds great. For a more natural timbre, switch to Qwen (usage-based, ≈¥1 per 10k chars).
+
+Speech recognition needs a cloud engine: get an API Key from [Alibaba Cloud Model Studio](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key), then paste it into Qwen's "Settings" under Settings → Plugins → Voice chat; the model and endpoint are built in.
 
 ### 3. Start talking
 

@@ -28,9 +28,11 @@ dsh plugin --profile web add /path/to/dsh-voice-talk
 
 需要 dsh 的 web profile：0.1.0-rc.7+（0.1.0-rc.x 与 0.1.5-rc.x 两代宿主线均已适配）；另需 Chrome / Edge、麦克风权限与网络。
 
-### 2. 配置大模型
+### 2. 配置语音
 
-在[阿里云百炼申请一个 API Key](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key)，然后到 设置 → 插件 → 语音对话，填进千问的「设置」即可；模型和地址已内置，充值就能用。目前支持千问，后续会引入更多语音引擎。
+发音默认用系统语音，免费；音色和语速都能调，挑一个顺耳的、把语速调好，效果就很不错。想要更自然的音色，可以切到千问（按量计费，约 1 元 / 万字符）。
+
+语音识别需要云端引擎：在[阿里云百炼申请一个 API Key](https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key)，然后到 设置 → 插件 → 语音对话，填进千问的「设置」即可；模型和地址已内置，充值就能用。
 
 ### 3. 开始使用
 
